@@ -58,6 +58,12 @@ export function isIdentifier(text) {
 
 /**
  * Split on a separator that appears outside brackets, quotes, and comments.
+ *
+ * A `=>` arrow is consumed as one token: its `>` is an arrow head, not a
+ * generic close. Counting it would drive `depth` negative, and every later
+ * separator — including the top-level commas of a parameter list — would then
+ * be read as nested. That is what made a parameter list with a function-typed
+ * parameter (`(predicate:(item:T)=>bool, items:Array<T>)`) unsplittable.
  * @param {string} text - input text.
  * @param {string} [sep] - single-character separator.
  * @returns {string[]} the trimmed top-level pieces.
@@ -78,6 +84,10 @@ export function splitTopLevel(text, sep = ',') {
       quote = char
       continue
     }
+    if (char === '=' && text[index + 1] === '>') {
+      index += 1
+      continue
+    }
     if (char === '(' || char === '<' || char === '[' || char === '{') depth += 1
     else if (char === ')' || char === '>' || char === ']' || char === '}') depth -= 1
     else if (char === sep && depth === 0) {
@@ -91,6 +101,9 @@ export function splitTopLevel(text, sep = ',') {
 
 /**
  * Index of a needle that appears at bracket/quote depth zero.
+ *
+ * Like {@link splitTopLevel}, a `=>` arrow is one token: its `>` must not close
+ * a generic, or the depth never returns to zero and the needle is never found.
  * @param {string} text - input text.
  * @param {string} needle - text to find.
  * @returns {number} index, or -1 when absent at top level.
@@ -109,6 +122,10 @@ export function indexTopLevel(text, needle) {
       quote = char
       continue
     }
+    if (char === '=' && text[index + 1] === '>') {
+      index += 1
+      continue
+    }
     if (char === '(' || char === '<' || char === '[' || char === '{') depth += 1
     else if (char === ')' || char === '>' || char === ']' || char === '}') depth -= 1
     else if (depth === 0 && text.startsWith(needle, index)) return index
@@ -118,6 +135,10 @@ export function indexTopLevel(text, needle) {
 
 /**
  * Index just past the bracket pair that opens at `start`.
+ *
+ * When the pair is `<…>`, a `=>` arrow inside it is one token — its `>` is an
+ * arrow head and must not be taken for the closing generic bracket, or the pair
+ * ends early (e.g. the constraint `T extends (a:int)=>void`).
  * @param {string} text - input text.
  * @param {number} start - index of the opening bracket.
  * @returns {number} index just past the matching close, or -1 when unbalanced.
@@ -136,6 +157,10 @@ export function matchPair(text, start) {
     }
     if (char === '"' || char === "'" || char === '`') {
       quote = char
+      continue
+    }
+    if (char === '=' && text[index + 1] === '>') {
+      index += 1
       continue
     }
     if (char === open) depth += 1

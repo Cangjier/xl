@@ -209,6 +209,10 @@ function matchingParen(text, open) {
 /**
  * Count comma-separated arguments in a parameter list body; an empty or
  * whitespace-only body has no arguments.
+ *
+ * A `=>` arrow is consumed as one token: a generated product routinely contains
+ * arrows (lambdas, function types), and counting the arrow's `>` as a close
+ * would drive the depth negative and hide every later top-level comma.
  * @param {string} body - text between the parentheses.
  * @returns {number} the argument count.
  */
@@ -226,6 +230,10 @@ function countTopLevelCommas(body) {
     }
     if (char === '"' || char === "'" || char === '`') {
       quote = char
+      continue
+    }
+    if (char === '=' && body[index + 1] === '>') {
+      index += 1
       continue
     }
     if (char === '(' || char === '<' || char === '[' || char === '{') depth += 1

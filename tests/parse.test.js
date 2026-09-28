@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseXlMd } from '../src/core/parse.js'
+import { indexAssign, parseXlMd } from '../src/core/parse.js'
 
 /**
  * Parse a source and return its diagnostics.
@@ -276,4 +276,25 @@ test('a heading inside a fenced block is content, not structure', () => {
   const { doc, diagnostics } = parseXlMd(text, 'x.xl.md')
   assert.deepEqual(diagnostics, [])
   assert.equal(doc.decls[0].body.rawBody, '# not a heading\nreturn 1;')
+})
+
+test('a parameter list may hold function-typed parameters', () => {
+  const text = ['# method bind:(predicate:(item:int)=>bool, items:Array<int>)=>bool', ''].join('\n')
+  assert.deepEqual(codes(text), [])
+  const { doc } = parseXlMd(text, 'x.xl.md')
+  assert.deepEqual(doc.decls[0].params.map(param => param.name), ['predicate', 'items'])
+  assert.equal(doc.decls[0].params[0].typeText, '(item:int)=>bool')
+  assert.equal(doc.decls[0].params[1].typeText, 'Array<int>')
+})
+
+test('a constructor may hold a function-typed parameter', () => {
+  const text = ['# class document', '', '## constructor:(getValue:(index:int)=>any, getCount:()=>int)=>void', ''].join('\n')
+  assert.deepEqual(codes(text), [])
+  const { doc } = parseXlMd(text, 'x.xl.md')
+  assert.deepEqual(doc.decls[0].members[0].params.map(param => param.name), ['getValue', 'getCount'])
+})
+
+test('indexAssign skips the arrow of a function type', () => {
+  assert.equal(indexAssign('f:(item:int)=>bool = true'), 19)
+  assert.equal(indexAssign('(item:int)=>bool'), -1)
 })

@@ -1348,6 +1348,10 @@ function checkPropertyModifiers(modifiers, node, ctx) {
 
 /**
  * Index of a top-level assignment `=` that is not part of `=>`, `==`, `<=`, `>=`, `!=`.
+ *
+ * A `=>` arrow is consumed as one token so its `>` cannot decrement the depth;
+ * otherwise the first arrow in a function type pushes the depth negative and a
+ * later real `=` (`## field f:(item:T)=>bool = true`) is never found.
  * @param {string} text - input text.
  * @returns {number} index, or -1 when absent.
  */
@@ -1363,6 +1367,10 @@ export function indexAssign(text) {
     }
     if (char === '"' || char === "'" || char === '`') {
       quote = char
+      continue
+    }
+    if (char === '=' && text[index + 1] === '>') {
+      index += 1
       continue
     }
     if (char === '(' || char === '<' || char === '[' || char === '{') depth += 1
