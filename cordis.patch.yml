@@ -1,0 +1,26 @@
+# The dsh-xl bundle patch.
+#
+# It contributes two rows and depends on nothing but the composition it is
+# installed into:
+#
+#   xl       the Host plugin that publishes the `xl` service and registers the
+#            model-facing `xl_*` tools. Safe in every profile that mounts
+#            `@deepseek-ai/dsh-tools`.
+#   xl-cli   the application row that turns the profile's own command line into
+#            `xl build` / `xl check` / `xl targets`. It stays disabled outside
+#            the profile named `xl`, because a profile's command line is parsed
+#            by exactly one application plugin: the Web profile already parses
+#            it for `dsh web --port`, and the headless profile for its task.
+
+- insert:
+    - id: xl
+      name: 'dsh-xl'
+      config:
+        workspaceRoot: null
+        cacheDir: '.xl'
+        defaultTargets: ['ts']
+        verifyOnEmit: true
+
+    - id: xl-cli
+      name: 'dsh-xl/cli'
+      disabled: !!js "ctx.get('profileContext')?.name !== 'xl'"

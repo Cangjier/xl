@@ -1,0 +1,213 @@
+/**
+ * Plugin tests: the service is published, the tools are registered, and the
+ * tool surface round-trips the plan channel.
+ *
+ * @module dsh-xl/tests/plugin
+ */
+
+import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import test from 'node:test'
+import { apply, normalizeConfig, XL_SERVICE } from '../src/plugin/index.js'
+import { TOOL_NAMES } from '../src/plugin/tools.js'
+import { callTool, dropWorkspace, makeFakeContext, makeWorkspace, read } from './helpers.js'
+
+const DEMO = [
+  '# namespace demo',
+  'demo package.',
+  '',
+  '# class point',
+  '',
+  '## field x:int = 0',
+  'x.',
+  '',
+  '## method move:(dx:int)=>void',
+  'move.',
+  '```ts',
+  'this.x = dx;',
+  '```',
+  '',
+  '### csharp',
+  '```csharp',
+  'public void Move(int dx) { X += dx; }',
+  '```',
+  '',
+].join('\n')
+
+/**
+ * Mount the plugin on a fake context rooted at a workspace.
+ * @param {string} cwd - workspace root.
+ * @param {object} [config] - plugin config.
+ * @returns {object} the fake context bundle.
+ */
+function mount(cwd, config = {}) {
+  const fake = makeFakeContext()
+  apply(fake.ctx, { workspaceRoot: cwd, ...config })
+  return fake
+}
+
+test('apply publishes the xl service and registers every tool', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    assert.ok(fake.services.has(XL_SERVICE))
+    assert.deepEqual([...fake.tools.keys()].sort(), [...TOOL_NAMES].sort())
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('the tool set is stable and documented', () => {
+  assert.deepEqual(TOOL_NAMES, [
+    'xl_plan',
+    'xl_context',
+    'xl_cache',
+    'xl_verify',
+    'xl_emit',
+    'xl_check',
+    'xl_build',
+  ])
+})
+
+test('every tool declares the required registration fields', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    for (const [name, definition] of fake.tools) {
+      assert.equal(definition.name, name)
+      assert.ok(definition.description.length > 20, `${name} needs a description`)
+      assert.equal(definition.parameters.type, 'object')
+      assert.equal(typeof definition.execute, 'function')
+      assert.equal(typeof definition.output.render, 'function')
+      assert.ok(definition.output.schema !== undefined)
+    }
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('normalizeConfig rejects a misconfigured row', () => {
+  assert.throws(() => normalizeConfig({ workspaceRoot: 7 }), TypeError)
+  assert.throws(() => normalizeConfig({ cacheDir: '' }), TypeError)
+  assert.throws(() => normalizeConfig({ defaultTargets: 'ts' }), TypeError)
+  assert.throws(() => normalizeConfig({ verifyOnEmit: 'yes' }), TypeError)
+  assert.deepEqual(normalizeConfig(undefined), {
+    workspaceRoot: null,
+    cacheDir: '.xl',
+    defaultTargets: ['ts'],
+    verifyOnEmit: true,
+  })
+})
+
+test('xl_plan reports the planned outputs and the channel', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { text, value } = await callTool(fake.tools, 'xl_plan', { targets: ['csharp'], cwd })
+    assert.equal(value.exitCode, 0)
+    assert.ok(text.includes('csharp/Point.cs'))
+    assert.ok(text.includes('produced by you'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_context reports the contract, the language sections, and the next steps', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { text } = await callTool(fake.tools, 'xl_context', { file: 'demo.xl.md', target: 'csharp', cwd })
+    assert.ok(text.includes('# xl context'))
+    assert.ok(text.includes('"name": "point"'))
+    assert.ok(text.includes('X += dx'))
+    assert.ok(text.includes('xl_emit'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_cache reports no previous version before the first emit', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { text } = await callTool(fake.tools, 'xl_cache', { file: 'demo.xl.md', target: 'csharp', cwd })
+    assert.ok(text.includes('none — nothing has been archived'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_verify then xl_emit writes the product and the header', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const content = 'public class point {\n  public int x;\n  public void move(int dx) { X += dx; }\n}\n'
+    const files = [{ path: 'csharp/Point.cs', content }]
+    const verified = await callTool(fake.tools, 'xl_verify', { file: 'demo.xl.md', target: 'csharp', files, cwd })
+    assert.ok(verified.text.includes('xl verify: ok'))
+    const emitted = await callTool(fake.tools, 'xl_emit', { file: 'demo.xl.md', target: 'csharp', files, cwd })
+    assert.equal(emitted.value.ok, true)
+    assert.ok(read(cwd, 'csharp/Point.cs').startsWith('// @generated by xl from demo.xl.md'))
+    const cached = await callTool(fake.tools, 'xl_cache', { file: 'demo.xl.md', target: 'csharp', cwd })
+    assert.ok(cached.text.includes('context hash:'))
+    assert.ok(cached.text.includes('reusable: yes'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_emit refuses a product that breaks the contract', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { value, text } = await callTool(fake.tools, 'xl_emit', {
+      file: 'demo.xl.md',
+      target: 'csharp',
+      files: [{ path: 'csharp/Point.cs', content: 'public class point { }' }],
+      cwd,
+    })
+    assert.equal(value.ok, false)
+    assert.ok(text.includes('E4002'))
+    assert.equal(existsSync(join(cwd, 'csharp/Point.cs')), false)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_check reports diagnostics with their codes', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': '# struct point\n' })
+  try {
+    const fake = mount(cwd)
+    const { value, text } = await callTool(fake.tools, 'xl_check', { cwd })
+    assert.equal(value.ok, false)
+    assert.ok(text.includes('E1002'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_build produces ts and plans the other targets', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { value, text } = await callTool(fake.tools, 'xl_build', { targets: ['ts', 'csharp'], cwd })
+    assert.equal(value.exitCode, 0)
+    assert.ok(read(cwd, 'demo.ts').startsWith('// @generated by xl'))
+    assert.equal(existsSync(join(cwd, 'csharp/Point.cs')), false)
+    assert.ok(text.includes('planned'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('the workspace root config makes cwd optional', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { value } = await callTool(fake.tools, 'xl_plan', { target: ['ts'] })
+    assert.equal(value.exitCode, 0)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})

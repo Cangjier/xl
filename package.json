@@ -1,0 +1,39 @@
+{
+  "name": "dsh-xl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "xl-md (*.xl.md) compiler for DeepSeek Harness: the xl command line, an xl Host service, and model-facing xl_* tools.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./cli": "./cli.js",
+    "./core": "./src/core/index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "cli.js",
+    "src",
+    "cordis.patch.yml",
+    "scripts",
+    "docs",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "check": "node --check index.js && node --check cli.js",
+    "codes": "node scripts/code-map.mjs",
+    "docs:sync": "node scripts/verify-docs-sync.mjs",
+    "fixtures": "node scripts/extract-fixtures.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
