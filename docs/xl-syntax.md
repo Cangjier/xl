@@ -9,14 +9,14 @@
 ```text
 # dependencies        ← 必须第一个，至多一次
 # namespace <name>    ← 可选，至多一次；惯例上紧接 # dependencies
-…任意个模块级声明（type / const / method）…
-…任意个类型声明（enum / interface / class）…
+…任意个声明（type / const / method / enum / interface / class）…
 …任意个 # statement…
 ```
 
-- 段落顺序：模块级声明（`type` / `const` / `method`）必须排在类型声明（`enum` / `interface` / `class`）之前，否则报 `E1005`。
+- 声明**没有顺序要求**：模块级声明（`type` / `const` / `method`）与类型声明（`enum` / `interface` / `class`）可以任意交错；`# method` 排在 `# class` 之后是合法的。
+- `# dependencies` 必须是第一个段落（否则 `E1004`），且至多一次。
 - `# namespace` **至多一次**（第二次报 `E1005`）；实现不检查它的位置，`# dependencies` 之后任意位置都接受。
-- `# statement` 不参与上述顺序：它既不触发也不重置 `E1005`，可以出现在文件任意位置（§17）。
+- `# statement` 同样不参与顺序判定，可以出现在文件任意位置（§17）。
 
 ## 1. 通用规则
 
@@ -211,17 +211,20 @@ return items[0]!;
 ````
 
 ````md
-# interface named extends printable
+# interface named<T extends object> extends printable
 
 ## field tag:string
+
+## property value:T
 
 ## method describe:()=>string
 ````
 
-- 成员只能是 `## field` 与 `## method`；写 `## property` / `## constructor` 报 `E1102`。
-- 成员只声明，不带函数体（带体报 `E1304`）、不带初始值（带初始值报 `E1102`）。
+- 成员可以是 `## field`、`## property` 与 `## method`；写 `## constructor` 报 `E1102`。
+- 成员只声明，不带函数体（访问器带体报 `E1304`）、不带初始值（带初始值报 `E1102`）。
+- `## property` 在 interface 里是**属性签名**：默认 `name: T`，只挂 `### get`（没有 `### set`）时是 `readonly name: T`（`xl-emit-ts.md` §6.2）。
 - `## field <name>?:<Type>` 的 `?` 表示可选。
-- `# interface` **不接受泛型参数**（`# interface a<T>` 报 `E1103`），也不接受 `implements`（报 `E1102`）；`extends` 只能指向另一个 interface，指向 class 或未知名字是 warning `E1105`。
+- `# interface` 接受泛型参数（`# interface named<T extends object>`），但不接受 `implements`（报 `E1102`）；`extends` 只能指向另一个 interface，指向 class 或未知名字是 warning `E1105`。
 - class 用 `implements` 声明实现某个 interface：成员名或参数个数对不上是 warning `E1105`。
 
 ## 11. `# class` 头部
@@ -276,9 +279,9 @@ new Map()
 ````
 
 - 与 `field` 的差别：`property` 可以挂 `### get` / `### set` 访问器（见 §14）。
+- **不挂访问器是合法的**：等价于 `### get` / `### set` 都写（都为空），ts 产物是一个后备字段加直通读写器（`xl-emit-ts.md` §8）。
 - 初始值一行能写完就内联 `= <expr>`，否则改用默认语言代码块。
 - 成员名后写 `?`（`## property label?:string`）是**无效的**：xl 接受它但把 `?` 丢掉，可选性由访问器语义表达（`xl-emit-ts.md` §8）。
-- 一个 `property` 至少要挂一个访问器，否则报 `E1209`；把它当普通字段用请改写成 `## field`。
 
 ## 14. property 访问器
 
@@ -299,7 +302,8 @@ this.raw = value;
 - 可见性修饰符见 §3，写在 `get` / `set` 之前。
 - 访问器可以只有标题、没有代码块（如 §13 的 `label`）。
 - 访问器下可再挂语言子标题 `#### <lang>`。
-- 顺序固定 `get` 在 `set` 之前（写反报 `E1210`），每种至多一个（重复报 `E1210`）。
+- **顺序任意**：`set` 写在 `get` 之前合法；产物固定按 get → set 排列。
+- 每种访问器至多一个（重复报 `E1210`）。
 - 写在非 `property` 成员下（如 `## method m:()=>void` 之后的 `### get`）报 `E1209`；`###` 下的第三个名字既不是 `get` / `set` 也不是语言名时报 `E1305`。
 
 ## 15. `constructor`

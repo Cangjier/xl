@@ -58,7 +58,7 @@ test('dependencies must come first and at most once', () => {
   assert.deepEqual(codes(text), ['E1004'])
 })
 
-test('a module-level declaration after a type declaration is E1005', () => {
+test('a module-level declaration may follow a type declaration', () => {
   const text = [
     '# class point',
     '',
@@ -68,7 +68,7 @@ test('a module-level declaration after a type declaration is E1005', () => {
     '```',
     '',
   ].join('\n')
-  assert.deepEqual(codes(text), ['E1005'])
+  assert.deepEqual(codes(text), [])
 })
 
 test('a dependency line that is not an import is E1006', () => {
@@ -86,6 +86,11 @@ test('an interface with implements is E1102, and its members must be declaration
   assert.deepEqual(codes('# interface a implements b\n'), ['E1102'])
   const constructor = ['# interface a', '', '## constructor:()=>void', ''].join('\n')
   assert.ok(codes(constructor).includes('E1102'))
+})
+
+test('an accessor under a non-property member is still E1209', () => {
+  const text = ['# class c', '', '## method m:()=>int', '### get', ''].join('\n')
+  assert.ok(codes(text).includes('E1209'))
 })
 
 test('a malformed generic list is E1103', () => {
@@ -163,14 +168,39 @@ test('an optional parameter before a required one is E1208', () => {
   assert.ok(codes(text).includes('E1208'))
 })
 
-test('a property without accessors is E1209', () => {
+test('a property without accessors is legal and defaults to get and set', () => {
   const text = ['# class c', '', '## property label:string', ''].join('\n')
-  assert.deepEqual(codes(text), ['E1209'])
+  assert.deepEqual(codes(text), [])
+  const { doc } = parseXlMd(text, 'x.xl.md')
+  const property = doc.decls[0].members[0]
+  assert.deepEqual(property.accessors.map(accessor => accessor.kind), ['get', 'set'])
+  assert.deepEqual(property.accessors.map(accessor => accessor.synthesized), [true, true])
 })
 
-test('set before get is E1210', () => {
+test('set may be written before get; the emitted order is still get then set', () => {
   const text = ['# class c', '', '## property label:string', '### set', '### get', ''].join('\n')
-  assert.ok(codes(text).includes('E1210'))
+  assert.deepEqual(codes(text), [])
+  const { doc } = parseXlMd(text, 'x.xl.md')
+  assert.deepEqual(doc.decls[0].members[0].accessors.map(accessor => accessor.kind), ['get', 'set'])
+})
+
+test('an interface may declare a property and generic parameters', () => {
+  const text = [
+    '# interface holder<T extends object>',
+    '',
+    '## field id:string',
+    '',
+    '## property value:T',
+    '### get',
+    '',
+    '## method size:()=>int',
+    '',
+  ].join('\n')
+  assert.deepEqual(codes(text), [])
+  const { doc } = parseXlMd(text, 'x.xl.md')
+  assert.deepEqual(doc.decls[0].typeParams, [{ name: 'T', constraint: 'object', default: null }])
+  assert.deepEqual(doc.decls[0].members.map(member => member.kind), ['field', 'property', 'method'])
+  assert.deepEqual(doc.decls[0].members[1].accessors.map(accessor => accessor.kind), ['get'])
 })
 
 test('a malformed enum member line is E1212', () => {

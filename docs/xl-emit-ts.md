@@ -267,10 +267,13 @@ export interface printable {
 | `## field <name>?:<T>` | `<name>?: <T>;` |
 | `## readonly field <name>:<T>` | `readonly <name>: <T>;` |
 | `## method <name>:<T>(<参数>)=><返回>` | `<name><T>(<参数>): <返回>;` |
+| `## property <name>:<T>` | `<name>: <T>;`（属性签名） |
+| `## property <name>:<T>` + 只挂 `### get` | `readonly <name>: <T>;` |
 
-* 接口成员**不写可见性**（ts 接口成员恒为公开）。写在上面的 `public` / `private` / `protected` **不会被拒绝**（`xl-check.md` §3.2 C 的实现说明），产物同样忽略它们；`readonly` 只对 `## field` 有意义。
+* 接口头与 class 同形：`# interface name<T extends X> extends Base` → `export interface name<T extends X> extends Base {`。
+* 接口成员**不写可见性**（ts 接口成员恒为公开）。写在上面的 `public` / `private` / `protected` **不会被拒绝**（`xl-check.md` §3.2 C 的实现说明），产物同样忽略它们；`readonly` 只对 `## field` 有意义（property 的只读性由「有没有 `### set`」决定）。
 * 成员之间**不空行**；空接口输出 `export interface x {\n}`。
-* interface 里的 `## method` 必须无函数体；带体会被 `xl-check.md` 的 `E1304` 拒掉。
+* interface 里的 `## method` / `## property` 的访问器必须无函数体；带体会被 `xl-check.md` 的 `E1304` 拒掉。
 
 ---
 
@@ -307,6 +310,7 @@ export interface printable {
 | `## property score:int` + `### get`（带体） | 只生成 getter，**不合成 setter**（只读计算属性） |
 | `## property score:int` + `### set`（带体） | `#score: number;` + `public set score(value: number) {…}` |
 | `## property tag:string` + `### get`（空）+ `### set`（空） | `#tag: string;` + 直通 getter / setter |
+| `## property tag:string`（**不挂访问器**） | 等价于上一行：`#tag: string;` + 直通 getter / setter |
 | `### get` 或 `### set` 体内出现 `yield` | 该访问器变成 `public *<name>(): Generator<<T>> {…}` |
 
 规则汇总（由基准样例反推）：
@@ -314,8 +318,8 @@ export interface printable {
 1. **后备字段 `#<name>`**：有初始值、或 getter 没有可直出的函数体（只有 `### set`、getter 是生成器、或没有 `### get`）时生成；getter 带函数体且无初始值时视为计算属性，不生成后备字段。后备字段行与其后的访问器之间空一行（基准样例的 `#label` 之后即空行）。
 2. **访问器只有标题没有代码块** → 合成直通实现：`get` 为 `return this.#<name>;`，`set` 为 `this.#<name> = value;`。
 3. **访问器可见性**：`### private set` / `### protected set` 写进 setter 前；`### get` 的可见性同理；省略即 `public`。
-4. **只有 `### get` 或只有 `### set`**：合法，但 `property` 至少要有一个（否则 `xl-check.md` 的 `E1209`）。
-5. 访问器顺序恒为 **get 在前、set 在后**（语法 §14 的顺序要求，`xl-check.md` 的 `E1210`）。
+4. **不挂访问器**：合法，等价于挂了一对空标记（读写都支持）。只挂 `### get` 或只挂 `### set` 同样合法。
+5. 访问器顺序任意书写（`set` 在 `get` 之前也合法），**产物恒按 get 在前、set 在后**（语法 §14）。
 6. `property` 的成员名不加 `?`：可选性是访问器语义，不是 `#<name>` 字段的语义。
 7. 基准样例没有覆盖「默认值 + 带体 getter」这一组合（两者同时存在时以后备字段承载初始值，getter 体照常展开）；别把它当作已冻结的字节契约。
 

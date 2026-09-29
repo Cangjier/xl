@@ -61,10 +61,16 @@ export function createXlService(options = {}) {
 
   /**
    * Translate a request into the command-line option document the core reads.
+   *
+   * `defaultTargets` is the row's deployment default, so it is only injected
+   * when neither the request nor `xl.json` names a target: injecting it
+   * unconditionally would outrank `build.target` and make that key dead
+   * (service → `resolveBuildOptions` gives CLI options the highest precedence).
    * @param {object} request - the request.
+   * @param {object} config - the loaded configuration for the request's cwd.
    * @returns {object} the option document.
    */
-  const cliOf = (request) => {
+  const cliOf = (request, config) => {
     const cli = {
       flat: request.flat === true,
       force: request.force === true,
@@ -73,8 +79,10 @@ export function createXlService(options = {}) {
       stdout: request.stdout === true,
       clean: request.clean === true,
     }
-    const targets = request.targets ?? options.defaultTargets
-    if (Array.isArray(targets) && targets.length > 0) cli.targets = targets
+    if (Array.isArray(request.targets) && request.targets.length > 0) cli.targets = request.targets
+    else if (!hasConfiguredTargets(config) && !hasEnvTargets() && Array.isArray(options.defaultTargets) && options.defaultTargets.length > 0) {
+      cli.targets = options.defaultTargets
+    }
     if (typeof request.out === 'string' && request.out !== '') cli.out = request.out
     if (request.naming === 'idiomatic' || request.naming === 'preserve') cli.naming = request.naming
     if (Array.isArray(request.ignore) && request.ignore.length > 0) cli.ignore = request.ignore
@@ -109,7 +117,8 @@ export function createXlService(options = {}) {
      * @returns {object} the check result.
      */
     check(request = {}) {
-      return runCheck({ cwd: cwdOf(request.cwd), paths: request.paths ?? [], cli: cliOf(request) })
+      const cwd = cwdOf(request.cwd)
+      return runCheck({ cwd, paths: request.paths ?? [], cli: cliOf(request, configFor(cwd).config) })
     },
 
     /**
@@ -118,7 +127,8 @@ export function createXlService(options = {}) {
      * @returns {object} the plan result.
      */
     plan(request = {}) {
-      return runPlan({ cwd: cwdOf(request.cwd), paths: request.paths ?? [], cli: cliOf(request) })
+      const cwd = cwdOf(request.cwd)
+      return runPlan({ cwd, paths: request.paths ?? [], cli: cliOf(request, configFor(cwd).config) })
     },
 
     /**
@@ -128,7 +138,8 @@ export function createXlService(options = {}) {
      * @returns {object} the build result.
      */
     build(request = {}) {
-      return runBuild({ cwd: cwdOf(request.cwd), paths: request.paths ?? [], cli: cliOf(request) })
+      const cwd = cwdOf(request.cwd)
+      return runBuild({ cwd, paths: request.paths ?? [], cli: cliOf(request, configFor(cwd).config) })
     },
 
     /**
@@ -212,6 +223,29 @@ export function createXlService(options = {}) {
       })
     },
   }
+}
+
+/**
+ * Whether a configuration names its own default targets.
+ * @param {object} config - loaded configuration document.
+ * @returns {boolean} whether `build.target` holds at least one target.
+ */
+function hasConfiguredTargets(config) {
+  const target = config?.build?.target
+  if (Array.isArray(target)) return target.length > 0
+  return typeof target === 'string' && target.trim() !== ''
+}
+
+/**
+ * Whether the environment names default targets.
+ *
+ * `XL_TARGET` outranks the row's `defaultTargets`, so the row must not be
+ * injected as a CLI option when the variable is set — a CLI option would win.
+ * @returns {boolean} whether `XL_TARGET` carries at least one target.
+ */
+function hasEnvTargets() {
+  const target = process.env.XL_TARGET
+  return typeof target === 'string' && target.trim() !== ''
 }
 
 /**

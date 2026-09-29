@@ -18,10 +18,10 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import { BuildCacheSet } from './cache.js'
 import { checkWorkspace, languageContext, planWorkspace, prepareWorkspace } from './build.js'
-import { cacheRoot, DEFAULTS } from './config.js'
+import { cacheRoot, DEFAULTS, mergeEnv } from './config.js'
 import { countBySeverity, diag } from './diagnostics.js'
 import { XL_VERSION } from './emit-ts.js'
 import {
@@ -32,6 +32,7 @@ import {
   renderHeader,
 } from './header.js'
 import { commentMarkerFor } from './parse.js'
+import { resolveOutput } from './plan.js'
 import { resolveTarget } from './targets.js'
 import { structureSummary, verifyStructure } from './verify.js'
 
@@ -95,9 +96,10 @@ export function resolveArtifactRequest({ cwd, target, options = {}, config = {} 
  * @returns {object} the context, its plan, and the parsed source.
  */
 export function contextFor({ cwd, source, target, options = {}, config = {}, env = process.env }) {
-  const resolved = resolveArtifactRequest({ cwd, target, options, config })
+  const merged = mergeEnv(config, env)
+  const resolved = resolveArtifactRequest({ cwd, target, options, config: merged })
   const { prepared, entry } = loadEntry({ cwd, source })
-  const cache = openCache({ cwd, config, env, options: resolved.options })
+  const cache = openCache({ cwd, config: merged, env, options: resolved.options })
   const plans = planWorkspace(prepared, { targets: [resolved.target], options: resolved.options, cache, cwd })
   const plan = plans[0]
   const outputs = plan?.outputs ?? []
@@ -289,7 +291,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
         continue
       }
     }
-    const absolute = join(cwd, output.path)
+    const absolute = resolveOutput(cwd, output.path)
     if (existsSync(absolute) && !resolved.options.force && !isArtifact(readText(absolute))) {
       diagnostics.push(diag({
         code: 'E2001',
@@ -333,7 +335,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
     store.set(source, resolved.target.name, {
       fingerprint,
       out: written,
-      outHash: fingerprintArtifact(written.map(path => readText(join(cwd, path))).join('\u0000')),
+      outHash: fingerprintArtifact(written.map(path => readText(resolveOutput(cwd, path))).join('\u0000')),
       ...model === undefined ? {} : { model },
       promptHash: context.promptHash,
     })

@@ -270,6 +270,63 @@ test('xl_build produces ts and plans the other targets', async () => {
   }
 })
 
+test('xl.json build.target is honoured even though the row supplies defaultTargets', async () => {
+  const config = JSON.stringify({ build: { target: ['csharp'] } })
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO, 'xl.json': config })
+  try {
+    const fake = mount(cwd)
+    const { value, text } = await callTool(fake.tools, 'xl_build', { cwd })
+    assert.deepEqual(value.files.map(file => file.target), ['csharp'])
+    assert.ok(text.includes('produced by you') || text.includes('planned'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_plan and xl_emit agree on flat and preserve naming', async () => {
+  const cwd = makeWorkspace({ 'pkg/demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const planned = await callTool(fake.tools, 'xl_plan', { targets: ['csharp'], flat: true, naming: 'preserve', cwd })
+    assert.ok(planned.text.includes('dist/csharp/point.cs'))
+
+    const files = [{
+      path: 'dist/csharp/point.cs',
+      content: 'public class point {\n  public int x;\n  public void move(int dx) { X += dx; }\n}\n',
+    }]
+    const verified = await callTool(fake.tools, 'xl_verify', {
+      file: 'pkg/demo.xl.md', target: 'csharp', files, flat: true, naming: 'preserve', cwd,
+    })
+    assert.ok(verified.text.includes('xl verify: ok'))
+    const emitted = await callTool(fake.tools, 'xl_emit', {
+      file: 'pkg/demo.xl.md', target: 'csharp', files, flat: true, naming: 'preserve', cwd,
+    })
+    assert.equal(emitted.value.ok, true)
+    assert.deepEqual(emitted.value.written, ['dist/csharp/point.cs'])
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_emit without the plan options refuses the mismatched path', async () => {
+  const cwd = makeWorkspace({ 'pkg/demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const emitted = await callTool(fake.tools, 'xl_emit', {
+      file: 'pkg/demo.xl.md',
+      target: 'csharp',
+      files: [{ path: 'dist/csharp/Point.cs', content: 'public class point { }' }],
+      flat: true,
+      naming: 'preserve',
+      cwd,
+    })
+    assert.equal(emitted.value.ok, false)
+    assert.ok(emitted.text.includes('E2001'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
 test('the workspace root config makes cwd optional', async () => {
   const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
   try {

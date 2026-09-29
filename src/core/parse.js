@@ -37,10 +37,10 @@ export const SECTION_KEYWORDS = new Set([
   'statement',
 ])
 
-/** Sections that declare module-level values; they must precede type declarations. */
+/** Sections that declare module-level values. They may appear in any order. */
 export const MODULE_SECTION_KINDS = new Set(['type', 'const', 'method'])
 
-/** Sections that declare a type; they must follow module-level declarations. */
+/** Sections that declare a type. They may appear in any order. */
 export const TYPE_SECTION_KINDS = new Set(['enum', 'interface', 'class'])
 
 /** Legal member keywords (xl-syntax §2). */
@@ -132,7 +132,6 @@ export function parseXlMd(text, file) {
     return { doc, diagnostics: ctx.diagnostics }
   }
 
-  let seenTypeSection = false
   let firstSection = true
 
   for (const node of nodes) {
@@ -164,12 +163,9 @@ export function parseXlMd(text, file) {
       continue
     }
     firstSection = false
-    const kind = keyword
-    if (TYPE_SECTION_KINDS.has(kind)) seenTypeSection = true
-    else if (MODULE_SECTION_KINDS.has(kind) && seenTypeSection) {
-      emit(ctx, 'E1005', node.line, `module-level declaration "${kind}" must appear before enum / interface / class declarations`)
-    }
-    const decl = parseDeclaration(kind, node, ctx, spec, modifiers)
+    // Declarations carry no order requirement: a module-level `type` / `const` /
+    // `method` may follow an `enum` / `interface` / `class` (xl-syntax §0).
+    const decl = parseDeclaration(keyword, node, ctx, spec, modifiers)
     if (decl !== null) doc.decls.push(decl)
   }
 
@@ -845,8 +841,9 @@ function parseEnumDecl(node, ctx, spec, modifiers) {
 function parseInterfaceDecl(node, ctx, spec, modifiers) {
   const decl = emptyDecl('interface', node)
   decl.modifiers = [...modifiers]
-  const parsed = parseTypeHeader(spec, ctx, node.line, { allowGenerics: false })
+  const parsed = parseTypeHeader(spec, ctx, node.line, { allowGenerics: true })
   decl.name = parsed.name
+  decl.typeParams = parsed.typeParams
   decl.extends = parsed.extends
   if (parsed.implements.length > 0) {
     emit(ctx, 'E1102', node.line, '# interface must not declare "implements"')
@@ -1072,8 +1069,8 @@ function parseMember(node, ctx, owner) {
     Object.assign(member, parsed)
   }
 
-  if (owner.owner === 'interface' && kind !== 'field' && kind !== 'method') {
-    emit(ctx, 'E1102', node.line, `an interface member must be a field or a method, got "${kind}"`)
+  if (owner.owner === 'interface' && kind !== 'field' && kind !== 'method' && kind !== 'property') {
+    emit(ctx, 'E1102', node.line, `an interface member must be a field, a property, or a method, got "${kind}"`)
   }
 
   if (kind === 'method' || kind === 'constructor') {
@@ -1126,15 +1123,19 @@ function collectMemberChildren(node, member, ctx, owner) {
     if (getters.length > 1 || setters.length > 1) {
       emit(ctx, 'E1210', node.line, `property "${member.name}" declares an accessor twice`)
     }
-    if (member.accessors.length > 0) {
-      const firstSet = member.accessors.findIndex(accessor => accessor.kind === 'set')
-      const lastGet = member.accessors.map(accessor => accessor.kind).lastIndexOf('get')
-      if (firstSet >= 0 && lastGet > firstSet) {
-        emit(ctx, 'E1210', node.line, `property "${member.name}" must declare get before set`)
-      }
-      member.accessors.sort((left, right) => (left.kind === right.kind ? 0 : left.kind === 'get' ? -1 : 1))
+    if (member.accessors.length === 0) {
+      // A property that names no accessor means "both are supported": the
+      // synthesized pair behaves exactly like two empty `### get` / `### set`
+      // markers (xl-syntax §14). The marker keeps `W3010` from treating it as a
+      // member without a generation basis — a pass-through property describes
+      // itself.
+      member.accessors.push(
+        { kind: 'get', modifiers: [], body: null, sections: [], line: node.line, synthesized: true },
+        { kind: 'set', modifiers: [], body: null, sections: [], line: node.line, synthesized: true },
+      )
     } else {
-      emit(ctx, 'E1209', node.line, `property "${member.name}" declares neither "### get" nor "### set"`)
+      // `get` before `set` is the emitted order, not a source requirement.
+      member.accessors.sort((left, right) => (left.kind === right.kind ? 0 : left.kind === 'get' ? -1 : 1))
     }
   } else {
     for (const child of node.children) {

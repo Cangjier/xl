@@ -217,18 +217,18 @@ export const HELP_TEXT = `xl ${XL_CLI_VERSION} — xl-md (*.xl.md) compiler
                   生成由 DSH 会话里的 agent 调用 xl_* 工具完成，xl 不调用模型。
 
 build 选项:
-  -t, --target <lang>       目标语言，可重复（-t ts -t csharp）；缺省取 xl.json 的 build.target，再缺省 ts
-  -o, --out <dir>           输出根目录（缺省：xl.json 的 build.out，再缺省 dist）；每个目标语言各用自己的子目录，即 <out>/<lang>/…
+  -t, --target <lang>       目标语言，可重复（-t ts -t csharp）；缺省取 xl.json 的 build.target，再取行配置的 defaultTargets，再缺省 ts
+  -o, --out <dir>           输出根目录（缺省：xl.json 的 build.out，再缺省 dist）；每个目标语言各用自己的子目录，即 <out>/<lang>/…；可给绝对路径
   --flat                    丢弃源文件相对目录层级
   --stdout                  产物正文写标准输出、不落盘
   --naming <mode>           idiomatic（缺省）| preserve
   --force                   忽略指纹与缓存，强制重新生成
-  --no-cache                本次不读写增量缓存
-  --clean                   构建前删除本次会覆盖的旧产物
+  --no-cache                本次不读写增量缓存（历史版本归档也停止写入）
+  --clean                   删除本次计划的所有产物，并强制重新生成
   --concurrency <n>         并发任务数（缺省 min(4, CPU)）
   --keep-going              单个文件失败后继续构建其余文件
   --dry-run                 只打印计划，不写盘
-  --ignore <codes>          忽略指定诊断码，逗号分隔
+  --ignore <codes>          忽略指定诊断码，逗号分隔（写盘失败与输出冲突不受影响）
   --strict                  warning 视为 error
   --max-warnings <n>        warning 数量上限
   --format <fmt>            pretty（缺省）| compact | json
@@ -236,7 +236,7 @@ build 选项:
   -q, --quiet               只输出错误
   --verbose                 输出调试信息
   --json                    NDJSON 事件流
-  --color <when>            auto（缺省）| always | never
+  --color <when>            auto（缺省）| always | never；auto 跟随 TTY，NO_COLOR / FORCE_COLOR 同样生效
 
 check 选项:
   -t, --target <lang>       决定生成质量提示针对的目标语言

@@ -123,18 +123,34 @@ export function loadConfig(cwd, env = process.env) {
 
 /**
  * Environment-variable overrides (xl-cli §5).
+ *
+ * Only `XL_TARGET` and `XL_OUT` are read here; `XL_CONFIG` replaces the config
+ * file itself and `XL_CACHE_DIR` names the cache root, both handled where they
+ * apply.
  * @param {object} env - environment snapshot.
  * @returns {object} the override document.
  */
-export function envConfig(env) {
-  const out = { build: {}, check: {} }
+export function envOverrides(env) {
+  const build = {}
   if (env.XL_TARGET !== undefined && env.XL_TARGET !== '') {
-    out.build.target = env.XL_TARGET.split(',').map(part => part.trim()).filter(part => part !== '')
+    build.target = env.XL_TARGET.split(',').map(part => part.trim()).filter(part => part !== '')
   }
-  if (env.XL_OUT !== undefined && env.XL_OUT !== '') out.build.out = env.XL_OUT
-  if (env.XL_TIMEOUT !== undefined && env.XL_TIMEOUT !== '') out.build.timeout = Number(env.XL_TIMEOUT)
-  if (env.XL_CONCURRENCY !== undefined && env.XL_CONCURRENCY !== '') out.build.concurrency = Number(env.XL_CONCURRENCY)
-  return out
+  if (env.XL_OUT !== undefined && env.XL_OUT !== '') build.out = env.XL_OUT
+  return { build }
+}
+
+/**
+ * Apply the environment layer to a loaded configuration.
+ *
+ * Every entry point merges it, so the documented precedence — CLI argument >
+ * environment variable > `xl.json` > built-in default — holds for `xl check`,
+ * the `xl_*` tools, and `xl build` alike.
+ * @param {object} config - loaded configuration document.
+ * @param {object} [env] - environment snapshot; defaults to `process.env`.
+ * @returns {object} the merged document.
+ */
+export function mergeEnv(config, env = process.env) {
+  return deepMerge(config ?? {}, envOverrides(env ?? {}))
 }
 
 /**

@@ -108,6 +108,8 @@ xl_emit      → 一次提交这一份源 × 目标的全部文件；xl 负责�
 
 `xl_emit` 的 `files` 必须逐一对应 `xl_plan`/`xl_context` 报出的路径：给出计划外的路径会被拒（`E2001`），漏掉计划内的路径会被拒（`E4002`），产物结构与 IR 不一致会被拒（`E4002`）且**不写盘**，agent 改完再调一次即可。
 
+路径由 `out` / `naming` / `flat` 参与计算：`xl_plan`、`xl_context`、`xl_verify`、`xl_emit` 都接受这三个参数，调用时必须与规划时给的完全一致，否则算出来的路径与计划对不上。
+
 ### 3.2 产物头
 
 非 ts 目标的**每个部件**各写一份产物头（C++ 的 `.h` 与 `.cpp` 各有一份），注释符按该部件的扩展名选：
@@ -138,20 +140,20 @@ xl --version | -v                版本
 
 | 选项 | 作用 |
 | --- | --- |
-| `-t, --target <lang>` | 目标语言，可重复；缺省取行配置的 `defaultTargets`（bundle patch 是 `['ts']`），它优先于 `xl.json` 的 `build.target`，再缺省 `ts`（§9） |
-| `-o, --out <dir>` | 输出根目录；缺省取 `xl.json` 的 `build.out`，再缺省 `dist` |
+| `-t, --target <lang>` | 目标语言，可重复；缺省取 `xl.json` 的 `build.target`，再取行配置的 `defaultTargets`（bundle patch 是 `['ts']`），再缺省 `ts` |
+| `-o, --out <dir>` | 输出根目录；缺省取 `xl.json` 的 `build.out`，再缺省 `dist`；可给绝对路径 |
 | `--flat` | 丢弃源文件相对目录层级 |
 | `--stdout` | 产物正文写标准输出、不落盘 |
 | `--naming <mode>` | `idiomatic`（缺省）\| `preserve` |
 | `--force` | 忽略指纹与缓存，强制重新生成 |
-| `--no-cache` | 本次不读写增量缓存 |
-| `--clean` | 写盘前删除本次会覆盖的旧产物 |
+| `--no-cache` | 本次不读写增量缓存，也不写历史版本归档 |
+| `--clean` | 归档并删除本次计划的所有产物，然后强制重新生成 |
 | `--dry-run` | 只打印计划，不写盘 |
-| `--ignore <codes>` | 忽略指定诊断码，逗号分隔 |
-| `--strict` | warning 视为 error |
-| `--max-warnings <n>` | warning 数量上限 |
+| `--ignore <codes>` | 忽略指定诊断码，逗号分隔（产物层的 `E2001` / `E2002` / `E2003` 不可忽略） |
+| `--strict` | warning 视为 error（只对 `xl check` 生效） |
+| `--max-warnings <n>` | warning 数量上限（只对 `xl check` 生效） |
 | `--format <fmt>` | `pretty`（缺省）\| `compact` \| `json` |
-| `-q, --quiet` / `--verbose` / `--json` / `--color <when>` | 输出控制 |
+| `-q, --quiet` / `--verbose` / `--json` / `--color <when>` | 输出控制；前两者也接受 `XL_LOG`，颜色受 `NO_COLOR` / `FORCE_COLOR` 影响 |
 | `--cwd <dir>` | 以指定目录为基准解析路径与配置 |
 
 ### 4.3 被接受但无效的选项
@@ -160,7 +162,7 @@ xl --version | -v                版本
 
 `--harness` `--harness-profile` `--timeout` `--retries` `--keep-going` `--concurrency`
 
-另有几个选项在 `xl build` 上**被接受但读取后不使用**：`--strict` / `--max-warnings`（只对 `xl check` 生效）、`--verify` / `--no-verify`（只决定 `xl_emit` 的 `verify` 缺省）、`--color`（没有颜色代码路径，取值会被校验但丢弃）。`XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` 同样不被读取。`XL_TARGET` / `XL_OUT` 只在 `xl build` 上生效，`xl check` 与各 `xl_*` 工具不读它们。
+另有几个选项在 `xl build` 上**被接受但读取后不使用**：`--verify` / `--no-verify`（只决定 `xl_emit` 的 `verify` 缺省）；`--keep-going` 是冗余的（单个文件失败本来就不中断整轮构建），`--concurrency` 对 ts 直出也没有意义。`XL_TIMEOUT` / `XL_CONCURRENCY` / `XL_HARNESS` 不被读取。
 
 ### 4.4 输出布局
 
@@ -184,7 +186,7 @@ dist/
 - 语言目录是计划的产物路径的一部分：`xl_plan` / `xl_context` 报出的路径就是要写的确切路径（每个部件一条，带 `part` 标记），`xl_emit` 只接受这些路径、且一个都不能少。
 - `--flat` 丢弃源文件相对目录，但保留语言目录（`dist/ts/demo.ts`）。
 - 每个语言目录下另有自己的增量 cache：`dist/ts/.xl/`、`dist/csharp/.xl/`（§6）。
-- 未给 `-o` / `build.out` 时 `<out>` 是 `dist`；`-o` 是相对工作目录的前缀，**不要给绝对路径**（会被拼进工作目录，§9）。
+- 未给 `-o` / `build.out` 时 `<out>` 是 `dist`；`-o` 可以是相对工作目录的路径，也可以是绝对路径（绝对路径会原样出现在计划里）。
 
 ### 4.5 退出码
 
@@ -195,7 +197,7 @@ dist/
 | 2 | 用法错误（未知选项 / 未知目标 / 无输入 / 路径不存在） |
 | 3 | 计划通道失败（本插件不返回；由 agent 侧的 `xl_emit` 以 `E4002` 表达） |
 
-`--ignore` 会把码从计数里移除：`--ignore E2002` 之类可以在写盘失败后仍然返回 0；只有计划路径冲突（`E2001`）在冲突阶段无条件返回 1。
+`--ignore` 只对解析 / 检查层的码生效：`E2001` / `E2002` / `E2003` 写进 `--ignore` 也照常计数，写盘失败或输出冲突一律退出 1。
 
 ---
 
@@ -237,9 +239,10 @@ dist/
 
 - 自定义目标给 `ext`（单部件，等价于 `parts: [{ "role": "file", "ext": … }]`）或直接给 `parts`。`parts` 里 `role` 是部件名（缺省 `part1`、`part2`…，同一目标内唯一），`ext` 必填，`requires: "bodies"` 表示"该单元有可执行内容时才计划"，`scope: "definition"` 表示"这个部件只定义部分成员"（见 [docs/xl-cli.md](docs/xl-cli.md) §3.5）。声明不成部件表是用法错误（`E0004`，退出码 2）。
 
+- `build.target`（字符串或数组）是缺省目标，优先于行配置的 `defaultTargets`；`build.out`、`build.naming`、`build.header`、`build.cacheVersions`、`build.cacheDir` 都生效。
 - `harness` 段整体不再被读取（没有子进程通道）；`targets.<lang>.model` 虽然被读进目标描述符，但无人消费——模型 id 由 agent 在 `xl_emit` 的 `model` 参数里给出；`targets.<lang>.layout` 则根本不读：自定义目标走计划通道，而计划通道恒为 `type`（§4.4）。
 
-优先级一律是 **CLI 参数 > 环境变量（`XL_TARGET` / `XL_OUT` / `XL_CONFIG` / `XL_CACHE_DIR`）> `xl.json` > 内置缺省**；其中 `XL_TARGET` / `XL_OUT` 只在 `xl build` 的入口合并，`XL_CONFIG` / `XL_CACHE_DIR` 在所有入口生效。
+优先级一律是 **CLI 参数 > 环境变量（`XL_TARGET` / `XL_OUT` / `XL_CONFIG` / `XL_CACHE_DIR`）> `xl.json` > 内置缺省**，所有入口（CLI 与七个工具）适用同一套规则。
 
 ---
 
@@ -256,8 +259,8 @@ dist/
 
 缺省 `<out>` 是 `dist`，所以 ts 的存储是 `dist/ts/.xl/`、csharp 的是 `dist/csharp/.xl/`：每个语言一份独立存储，互不读取。`build.cacheDir` / `XL_CACHE_DIR` 给的是该目录名（缺省 `.xl`）——相对值放在语言目录之下，绝对值原样使用（此时所有语言共享一份存储，仍然正确：`cache.json` 按 源 × 目标 分键，归档文件名带目标扩展名）。仅仅**计划**某个语言（`xl_plan` / `xl_context`，或 `xl build -t <其它语言>`）不会建出该目录：没有任何 源 × 目标 被记录时 cache 不落盘。
 
-- **复用判定**：计划中的每个产物都存在、带 xl 头、`xl:target` 是本目标、`xl:sha256` 等于当前源指纹 → 跳过。
-- **归档**：覆盖前把被覆盖的那一份存为下一序号；最新一版就是 `xl_cache` / `xl_context` 给出的「上一版」，用来在它之上改而不是重写。
+- **复用判定**：计划中的每个产物都存在、带 xl 头、`xl:target` 是本目标、`xl:sha256` 等于当前源指纹 → 跳过。`--clean` 直接判定为不可复用，于是整轮重新生成。
+- **归档**：覆盖前把被覆盖的那一份存为下一序号；最新一版就是 `xl_cache` / `xl_context` 给出的「上一版」，用来在它之上改而不是重写。`--no-cache` 同时关闭 `cache.json` 与归档。
 - **手改检测**（`E2003`）：产物内容哈希与 cache 记录不一致，说明它在 xl 之外被改过，覆盖前给一次 warning。
 
 ---
@@ -268,7 +271,7 @@ dist/
 
 仍然值得知道的偏差集中在两处：
 
-- [docs/design.md](docs/design.md) §8「已知行为偏差与缺口」：面向维护者（`build.target` 被行配置的 `defaultTargets` 遮住、`--flat` / `naming: preserve` 的计划无法经 `xl_verify` / `xl_emit` 落盘、`--no-cache` 仍写历史归档、绝对 `-o` 不支持等）。
+- [docs/design.md](docs/design.md) §8「已知行为偏差与缺口」：面向维护者（几个选项在 `xl build` 上不生效、`build.naming` 不校验、interface 成员修饰符不报错、`E4001` 故意不产生等）。
 - 本文 §9「已知限制」：面向使用者。
 
 `docs/xl-base-case.md` 是**冻结的字节级验收基准**：`tests/fixtures/*` 由它抽取（`pnpm fixtures`）。改动它必须重抽 fixture 并一起提交，其余四份文档则随手改。
@@ -325,12 +328,8 @@ scripts/                  extract-fixtures.mjs / code-map.mjs
 
 - **写盘绕过 `ctx.fs` 沙箱。** `xl_emit` 与 ts 直出直接用 `node:fs` 写文件，因此不受 profile 的文件沙箱与审批策略约束。这是为了让插件零依赖、可在任意 profile 装载；如果部署需要沙箱，应把 `src/core/artifact.js` 与 `src/core/build.js` 的写盘改成走 `ctx.fs`。
 - **没有子进程通道。** 这是设计目标，不是缺口：非 ts 目标的生成者是会话里的 agent。
-- **`xl.json` 的 `build.target` 不生效。** 服务层总是把行配置的 `defaultTargets`（bundle patch 是 `['ts']`）当作显式目标传入，它优先于 `build.target`；把该行配置改成 `[]` 才会轮到 `build.target`。要指定目标请用 `-t` 或工具的 `targets` 参数。
-- **`--flat` / `naming: preserve` 的计划无法落盘。** `xl_verify` / `xl_emit` 不接受 `naming` / `flat`（`xl_verify` 也没有 `out`），重新计算的路径与计划不一致，`xl_emit` 会以 `E2001` 拒绝。端到端可用的组合是「不压平 + `xl.json` 的 `naming`」。
-- **`-o` / `build.out` 不支持绝对路径。** 计划路径把该值直接拼在语言目录之前，绝对路径会被拼进工作目录；`../out` 这类相对上跳可用。
-- **`--no-cache` 只跳过 `cache.json`。** 历史版本归档由 `cacheVersions` 单独控制，仍会写入。
-- **`--ignore` 会连同计数一起移除。** `--ignore E2002` 之类可以在写盘失败后仍然返回 0；计划路径冲突（`E2001`）不受影响，仍返回 1。
-- **未实现的文档能力。** `xl.json` 的 `build.layout` / `build.verify` / `build.specHint` / `build.source`、`targets.<lang>.namespace`（只被读入描述符，无人消费）、`targets.<lang>.layout`（布局恒为目标的属性）、`targets.<lang>.model`（模型 id 由 `xl_emit` 的 `model` 参数给出）在本实现中不生效；`--concurrency` 不影响结果（ts 打印是同步的）。`--color` 与 `XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` 不被读取。
+- **`xl build` 上的几个选项不产生作用。** `--verify` / `--no-verify` 只决定 `xl_emit` 的 `verify` 缺省；`--keep-going` 是冗余的（单文件失败本来就不中断整轮）；`--concurrency` 对 ts 直出没有意义；`--harness` / `--harness-profile` / `--timeout` / `--retries` 属于旧设计，只为兼容而被接受。
+- **未实现的文档能力。** `xl.json` 的 `build.layout` / `build.verify` / `build.specHint` / `build.source`、`targets.<lang>.namespace`（只被读入描述符，无人消费）、`targets.<lang>.layout`（布局恒为目标的属性）、`targets.<lang>.model`（模型 id 由 `xl_emit` 的 `model` 参数给出）在本实现中不生效。`XL_TIMEOUT` / `XL_CONCURRENCY` / `XL_HARNESS` 不被读取。
 - **`E2003` 依赖 cache。** `--no-cache` 时无法判断产物是否被手改，因此不会报告；`xl_emit` 也不做这项检查。
 - **归档家族是 源 × 扩展名，不是 源 × 产物路径。** `xl_cache` 给的"上一版"是该扩展名最新归档的那一份；`layout=type` 下一个源有多个同扩展名产物时（`Point.cs`、`Box.cs`…），它只保留其中一个的历史。`cpp` 因此每份 `previous` 对应一个部件扩展名，而不是每个类型各一份。
 - **类成员只支持 `### <lang>`。** 类级的 `## <lang>` 会被当成成员标题而报 `E1201`（[docs/xl-syntax.md](docs/xl-syntax.md) §16）。

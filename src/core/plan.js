@@ -23,6 +23,7 @@
  * @module xl/core/plan
  */
 
+import { isAbsolute, join } from 'node:path'
 import {
   LAYOUT_TYPE,
   MODULE_FILE_SUFFIX,
@@ -41,6 +42,20 @@ export function outputRoot(out) {
   if (out === null || out === undefined) return ''
   const normalized = toPosix(String(out)).replace(/\/+$/, '').replace(/^\.\//, '')
   return normalized === '.' ? '' : normalized
+}
+
+/**
+ * The filesystem path of a planned output.
+ *
+ * A planned path is normally relative to the working directory, but an absolute
+ * `--out` / `build.out` makes it absolute; `path.join(cwd, absolute)` would
+ * mangle that, so every read and write goes through this helper.
+ * @param {string} cwd - working directory.
+ * @param {string} path - planned output path.
+ * @returns {string} the absolute filesystem path.
+ */
+export function resolveOutput(cwd, path) {
+  return isAbsolute(path) ? path : join(cwd, path)
 }
 
 /**

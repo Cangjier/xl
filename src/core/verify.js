@@ -127,6 +127,7 @@ function summarizeMember(member, ownerKind) {
         kind: accessor.kind,
         ...accessor.modifiers.length === 0 ? {} : { modifiers: [...accessor.modifiers] },
         hasBody: accessor.body !== null,
+        ...accessor.synthesized === true ? { synthesized: true } : {},
       }))
       if (member.defaultValue !== undefined) {
         entry.hasInitialValue = true

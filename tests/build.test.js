@@ -6,10 +6,12 @@
  */
 
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { runBuild, runCheck, runPlan } from '../src/core/build.js'
+import { toPosix } from '../src/core/text.js'
 import { dropWorkspace, makeWorkspace, read, writeFiles } from './helpers.js'
 
 const DEMO = [
@@ -62,6 +64,73 @@ test('--force regenerates and --no-cache leaves no cache file', () => {
   try {
     runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'], force: true, cache: false }, env: {} })
     assert.equal(existsSync(join(cwd, 'dist', 'ts', '.xl', 'cache.json')), false)
+    assert.equal(existsSync(join(cwd, 'dist', 'ts', '.xl')), false)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('--no-cache stops archiving a version it overwrites', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'] }, env: {} })
+    writeFiles(cwd, { 'demo.xl.md': DEMO.replace('hi ${name}', 'hello ${name}') })
+    const result = runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'], cache: false }, env: {} })
+    assert.equal(result.written, 1)
+    assert.equal(existsSync(join(cwd, 'dist', 'ts', '.xl', 'cache', 'demo.ts.1')), false)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('--clean regenerates from scratch and still archives the version it replaced', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'] }, env: {} })
+    const first = read(cwd, 'dist/ts/demo.ts')
+    const result = runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'], clean: true }, env: {} })
+    assert.equal(result.written, 1)
+    assert.equal(result.skipped, 0)
+    assert.equal(result.files[0].status, 'generated')
+    assert.equal(read(cwd, 'dist/ts/.xl/cache/demo.ts.1'), first)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('--clean with --dry-run deletes nothing', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'] }, env: {} })
+    const first = read(cwd, 'dist/ts/demo.ts')
+    runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'], clean: true, dryRun: true }, env: {} })
+    assert.equal(read(cwd, 'dist/ts/demo.ts'), first)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('an absolute output root is honoured', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  const out = mkdtempSync(join(tmpdir(), 'xl-out-'))
+  try {
+    const result = runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'], out }, env: {} })
+    assert.equal(result.exitCode, 0)
+    assert.equal(result.files[0].out[0], `${toPosix(out)}/ts/demo.ts`)
+    assert.ok(existsSync(join(out, 'ts', 'demo.ts')))
+  } finally {
+    dropWorkspace(cwd)
+    rmSync(out, { recursive: true, force: true })
+  }
+})
+
+test('--ignore cannot mask an output conflict', () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO, 'dist/ts/demo.ts': 'hand written\n' })
+  try {
+    const result = runBuild({ cwd, paths: ['demo.xl.md'], cli: { targets: ['ts'], ignore: ['E2001'] }, env: {} })
+    assert.equal(result.exitCode, 1)
+    assert.ok(result.errors >= 1)
+    assert.equal(read(cwd, 'dist/ts/demo.ts'), 'hand written\n')
   } finally {
     dropWorkspace(cwd)
   }

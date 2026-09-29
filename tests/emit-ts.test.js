@@ -165,6 +165,53 @@ test('a function type maps its parameter names and types', () => {
   assert.ok(print(text).includes('(f: (a: number) => void)'))
 })
 
+test('a property with no accessor emits a backing field and a pass-through pair', () => {
+  const text = [
+    '# class c',
+    '',
+    '## property label:string = "unnamed"',
+    '',
+  ].join('\n')
+  const body = print(text)
+  assert.ok(body.includes('  #label: string = "unnamed";'))
+  assert.ok(body.includes('  public get label(): string { return this.#label; }'))
+  assert.ok(body.includes('  public set label(value: string) { this.#label = value; }'))
+})
+
+test('a property with a setter written before the getter still emits get first', () => {
+  const text = [
+    '# class c',
+    '',
+    '## property label:string',
+    '### set',
+    '### get',
+    '',
+  ].join('\n')
+  const body = print(text)
+  const getter = body.indexOf('public get label')
+  const setter = body.indexOf('public set label')
+  assert.ok(getter >= 0 && setter > getter)
+})
+
+test('an interface renders generic parameters and property signatures', () => {
+  const text = [
+    '# interface holder<T extends object>',
+    '',
+    '## property value:T',
+    '',
+    '## property readOnlyValue:T',
+    '### get',
+    '',
+    '## method size:()=>int',
+    '',
+  ].join('\n')
+  const body = print(text)
+  assert.ok(body.includes('export interface holder<T extends object> {'))
+  assert.ok(body.includes('  value: T;'))
+  assert.ok(body.includes('  readonly readOnlyValue: T;'))
+  assert.ok(body.includes('  size(): number;'))
+})
+
 test('a property with only get emits no setter and no backing field for a computed value', () => {
   const text = [
     '# class c',

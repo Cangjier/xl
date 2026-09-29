@@ -11,6 +11,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { USAGE_CODES } from '../core/diagnostics.js'
 import { createWriter, fileLine, planLine } from './console.js'
 import { HELP_TEXT, USAGE_TEXT, XL_CLI_VERSION, parseArgs, validateOptions } from './args.js'
 
@@ -28,6 +29,43 @@ export const internals = {
 
 /** Exit code for a usage error (xl-cli §3.8). */
 const EXIT_USAGE = 2
+
+/** `XL_LOG` values that turn into the flags they are shorthand for. */
+const LOG_LEVELS = new Set(['silent', 'error', 'debug', 'info'])
+
+/**
+ * Whether to emit ANSI colour.
+ *
+ * The flag wins; then the standard `NO_COLOR` / `FORCE_COLOR` variables; then
+ * `auto` follows the stream: colour only when stdout or stderr is a TTY.
+ * @param {string | undefined} option - the parsed `--color` value.
+ * @param {{out: object, err: object}} io - process streams.
+ * @param {object} env - environment snapshot.
+ * @returns {boolean} whether colour is on.
+ */
+function resolveColor(option, io, env) {
+  if (option === 'always') return true
+  if (option === 'never') return false
+  if (env.NO_COLOR !== undefined && env.NO_COLOR !== '') return false
+  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== '' && env.FORCE_COLOR !== '0') return true
+  return io.out?.isTTY === true || io.err?.isTTY === true
+}
+
+/**
+ * The effective quiet / verbose flags: an explicit flag wins over `XL_LOG`,
+ * which is the environment shorthand for the same two settings.
+ * @param {object} options - parsed options.
+ * @param {object} env - environment snapshot.
+ * @returns {{quiet: boolean, verbose: boolean}} the effective flags.
+ */
+function resolveLogging(options, env) {
+  const level = typeof env.XL_LOG === 'string' ? env.XL_LOG.trim().toLowerCase() : ''
+  const known = LOG_LEVELS.has(level)
+  return {
+    quiet: options.quiet === true || (known && (level === 'silent' || level === 'error')),
+    verbose: options.verbose === true || (known && level === 'debug'),
+  }
+}
 
 /**
  * Mount the `xl` command line.
@@ -55,13 +93,16 @@ export function apply(ctx) {
 async function run(ctx, argv, io, exit) {
   try {
     await ctx.get('loader')?.await()
+    const env = process.env
     const parsed = parseArgs(argv)
+    const logging = resolveLogging(parsed.options, env)
     const writer = createWriter({
       io,
-      quiet: parsed.options.quiet === true,
-      verbose: parsed.options.verbose === true,
+      quiet: logging.quiet,
+      verbose: logging.verbose,
       json: parsed.options.json === true,
       format: parsed.options.format,
+      color: resolveColor(parsed.options.color, io, env),
     })
 
     if (parsed.options.version === true) {
@@ -89,7 +130,9 @@ async function run(ctx, argv, io, exit) {
     }
     exit(await dispatch(ctx, parsed, writer, io))
   } catch (error) {
-    const usage = error !== null && typeof error === 'object' && error.name === 'UsageError'
+    // The usage codes are the ones that exit 2 and never enter diagnostic
+    // counting (`E0001`–`E0004`); anything else thrown is an operational error.
+    const usage = error !== null && typeof error === 'object' && USAGE_CODES.has(error.code)
     io.err.write(`xl: ${error instanceof Error ? error.message : String(error)}\n`)
     exit(usage ? EXIT_USAGE : 1)
   }
@@ -191,7 +234,8 @@ function runCheckCommand(service, request, writer) {
     warnings: result.warnings,
   })
   if (!writer.ndjson) {
-    writer.info(`${result.ok ? '✔' : '✖'} ${result.errors} error(s), ${result.warnings} warning(s) in ${result.files} file(s)`)
+    const mark = writer.paint(result.ok ? '✔' : '✖', result.ok ? 'ok' : 'error')
+    writer.info(`${mark} ${result.errors} error(s), ${result.warnings} warning(s) in ${result.files} file(s)`)
   }
   return result.exitCode
 }
@@ -296,7 +340,8 @@ function runBuildCommand(service, request, writer, io, options) {
     const parts = [`${result.written} written`, `${result.skipped} skipped`]
     if (result.planned > 0) parts.push(`${result.planned} planned`)
     parts.push(`${result.errors} error(s)`)
-    writer.info(`${result.ok ? '✔' : '✖'} build done in ${(result.ms / 1000).toFixed(1)}s — ${parts.join(', ')}`)
+    const mark = writer.paint(result.ok ? '✔' : '✖', result.ok ? 'ok' : 'error')
+    writer.info(`${mark} build done in ${(result.ms / 1000).toFixed(1)}s — ${parts.join(', ')}`)
     if (result.planned > 0) {
       writer.info('planned outputs belong to a DSH session: call xl_context, then xl_emit.')
     }

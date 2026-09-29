@@ -94,28 +94,28 @@ xl build [paths...] [options]
 | 输出 | `--stdout` | 产物（含 `@generated` 头）写标准输出、不落盘 |
 | 生成 | `--naming <mode>` | `idiomatic`（缺省）\| `preserve`：类型文件的命名策略（§3.5） |
 | 生成 | `--force` | 忽略复用判定，强制重新生成；并允许覆盖计划路径上的非 xl 产物 |
-| 生成 | `--no-cache` | 本次不读也不写增量缓存 `cache.json`，也不报告手改检测；**历史版本归档仍会写**（§3.6） |
-| 生成 | `--clean` | 写盘前删除本次会覆盖的旧产物（归档已经完成） |
+| 生成 | `--no-cache` | 本次不读也不写增量缓存 `cache.json`，**也不再写历史版本归档**，也不报告手改检测（§3.6） |
+| 生成 | `--clean` | 构建前归档并删除本次计划的所有产物，并强制重新生成（`--dry-run` / `--stdout` 下不删除任何东西） |
 | 生成 | `--dry-run` | 只打印「源 → 产物」计划，不写盘（照常报告输出冲突与手改提示） |
 | 生成 | `--verify` / `--no-verify` | **接受但不生效**：只决定 `xl_emit` 工具的 `verify` 缺省（§3.4） |
-| 校验 | `--ignore <codes>` | 忽略指定诊断码，逗号分隔，如 `--ignore W3011,E1107` |
+| 校验 | `--ignore <codes>` | 忽略指定诊断码，逗号分隔，如 `--ignore W3011,E1107`；产物层的 `E2001` / `E2002` / `E2003` 不可忽略（§3.8） |
 | 校验 | `--strict` | warning 视为 error（**只对 `xl check` 生效**，§3.8） |
 | 校验 | `--max-warnings <n>` | warning 超过 n 条即失败（**只对 `xl check` 生效**；缺省不限） |
 | 输出 | `--format <fmt>` | `pretty`（缺省）\| `compact` \| `json`（§3.7） |
 | 全局 | `--cwd <dir>` | 以指定目录为基准解析路径与配置（缺省当前目录） |
-| 全局 | `-q, --quiet` | 只输出 error |
-| 全局 | `--verbose` | 额外把计划与提示写到 stderr |
+| 全局 | `-q, --quiet` | 只输出 error（等价 `XL_LOG=silent` / `XL_LOG=error`） |
+| 全局 | `--verbose` | 额外把计划与提示写到 stderr（等价 `XL_LOG=debug`） |
 | 全局 | `--json` | NDJSON 事件流（§3.7），不写人类可读输出 |
-| 全局 | `--color <when>` | `auto`（缺省）\| `always` \| `never`；**接受但不生效**（输出不带 ANSI 颜色） |
+| 全局 | `--color <when>` | `auto`（缺省，跟随 TTY）\| `always` \| `never`；`NO_COLOR` / `FORCE_COLOR` 同样生效 |
 | 全局 | `-h, --help` / `-v, --version` | 帮助 / 版本 |
 
 **接受但无效的选项**：`--harness` / `--harness-profile` / `--timeout` / `--retries` / `--keep-going` / `--concurrency` / `--verify` / `--no-verify`。它们属于「xl 自己 spawn harness」的旧设计；本实现没有子进程通道，因此只是为了让既有命令行不报错而被接受，`--verbose` 下会提示一次。`--concurrency` 不影响结果（ts 打印是同步的），`--verify` / `--no-verify` 只影响 `xl_emit` 工具的缺省（§3.4）。
 
 **只属于 `xl check` 的判定项**：`--strict` 与 `--max-warnings` 在 `xl build` 上被接受但不读取——`xl build` 的退出码只由 error 数决定（§3.8）。
 
-**缺省目标**的解析顺序是 `-t` / `--target` → 服务行的 `defaultTargets`（bundle patch 里是 `['ts']`）→ `xl.json` 的 `build.target` → `ts`。注意第二级会**盖住** `xl.json`：按 `cordis.patch.yml` 装好后，`build.target` 实际不生效（`xl build` 与七个工具都走这条路径）；把行配置的 `defaultTargets` 设为 `[]` 才会轮到 `xl.json`。
+**缺省目标**的解析顺序是 `-t` / `--target` → `xl.json` 的 `build.target` → 服务行的 `defaultTargets`（bundle patch 里是 `['ts']`）→ `ts`。`defaultTargets` 只是部署侧的兜底：只有请求与 `xl.json` 都没给目标时才会被采用。
 
-同一目标只构建一次；`-t` 重复给同一语言时去重（按别名归一后的规范名）。**配置优先级**：CLI 参数 > 环境变量 > `xl.json` > 内置缺省（环境变量这一级只有 `xl build` 应用，见 §5）。
+同一目标只构建一次；`-t` 重复给同一语言时去重（按别名归一后的规范名）。**配置优先级**：CLI 参数 > 环境变量 > `xl.json` > 内置缺省。
 
 ### 3.2 输入解析
 
@@ -197,7 +197,7 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 
 **`promptHash`** 是生成上下文的指纹：`sha256(结构摘要 + 语言覆盖段 + 依赖摘要 + layout + parts + naming)` 的前 16 个十六进制字符，**不含源文件原文**（原文由 `xl:sha256` 表达）。它变了就说明生成依据变了，cache 因此失效。
 
-**工具参数的覆盖范围**：`xl_plan` / `xl_build` 可以给 `naming` / `flat` / `out`，`xl_context` / `xl_cache` 可以给 `out` / `naming` / `flat`，但 `xl_verify` 只接受 `out`、`xl_emit` 只接受 `out` 与 `force` —— 命名与压平只能来自 `xl.json`（或缺省）。所以 `--flat` 或 `naming: preserve` 的计划无法通过 `xl_emit` 落盘：路径对不上，`xl_emit` 会以 `E2001` 拒绝。端到端可用的组合是「不压平 + `xl.json` 里的 `naming`」。
+**工具参数的覆盖范围**：`xl_plan` / `xl_build` / `xl_context` / `xl_verify` / `xl_emit` 都接受 `out` / `naming` / `flat`；`xl_cache` 只接受 `out`。这些值参与**路径计算**，所以 `xl_verify` / `xl_emit` 必须收到与 `xl_plan` / `xl_context` 完全相同的一组值，否则重新算出的路径与计划对不上，提交会被 `E2001` 拒绝。
 
 ### 3.5 输出布局
 
@@ -233,7 +233,7 @@ dist/
   * `idiomatic`（缺省）：`csharp` / `java` / `go` 用 `PascalCase`，`python` / `rust` / `cpp` 用 `snake_case`（`HTTPClient` → `http_client.h`），其余原样；`csharp` / `java` 的 interface 另加 `I` 前缀（`printable` → `IPrintable.cs`，已经有 `I` + 大写开头时不重复加）。
   * `preserve`：类型名 / 基名原样成为文件名。
 * 源文件相对路径在 `<out>/<目标语言>` 下保留（`--flat` 关闭该行为）。保留目录不是装饰：不同源目录里完全可能有同名符号，压平会让两个源文件写同一个路径而静默丢掉一个。
-* `out` 是**相对工作目录**的路径前缀，不要给绝对路径：计划路径直接把它拼在语言目录之前，绝对路径会被拼进工作目录里（`C:/x` 会变成 `<cwd>/C:/x/…`）。`../out` 这类相对上跳是可行的。
+* `out` 可以是相对工作目录的路径，也可以是**绝对路径**：绝对路径会原样出现在计划里（`C:/x/ts/demo.ts`），xl 不再把它拼到工作目录之下。`../out` 这类相对上跳同样可用。
 * 同一个产物路径被计划写多次（`--flat` 或撞名）→ 报输出冲突 `E2001`，退出码 1，**绝不静默覆盖**。
 * 目标位置已存在**非 xl 产物**文件且无 `--force` → 输出冲突 `E2001`，退出码 1。
 
@@ -251,8 +251,9 @@ dist/
 * `xl:sha256:<key>` = `sha256(规范化源文件字节)`，规范化只统一换行，因此只改行尾不会让产物失效。
 * `xl.json` 的 `build.header: false` 时不写头三行。
 * **复用判定**：计划中的每个产物都存在、首行是 xl 头、`xl:target` 是本目标、`xl:sha256` 等于当前源指纹 → 直出通道跳过不写、计划通道报 `reusable`。`--force` 忽略该判定。
-* **增量缓存**位于该语言目录下：`<out>/<目标语言>/.xl/cache.json`（每个「源 × 目标」的源指纹、产物路径、产物内容哈希、model、promptHash、写入时间）。`--no-cache` 本次不读也不写这个文件（但归档照旧）；`build.cacheDir` / `XL_CACHE_DIR` 改变目录名（相对值仍在语言目录之下，绝对值原样使用）。直出通道只记录源指纹 / 产物路径 / 内容哈希；`model` 与 `promptHash` 由 `xl_emit` 记录。
+* **增量缓存**位于该语言目录下：`<out>/<目标语言>/.xl/cache.json`（每个「源 × 目标」的源指纹、产物路径、产物内容哈希、model、promptHash、写入时间）。`--no-cache` 本次不读也不写这个文件，也不写归档；`build.cacheDir` / `XL_CACHE_DIR` 改变目录名（相对值仍在语言目录之下，绝对值原样使用）。直出通道只记录源指纹 / 产物路径 / 内容哈希；`model` 与 `promptHash` 由 `xl_emit` 记录。
 * **历史版本 cache**（`<out>/<目标语言>/.xl/cache/<源相对路径去掉 .xl.md>.<扩展名>.<N>`）：覆盖旧产物前把被覆盖的那一份归档为下一序号，只保留最近 `build.cacheVersions` 版（缺省 5，`false` / `0` 关闭）。归档家族按**源 × 扩展名**组织：`cpp` 的 `.h` 与 `.cpp` 各有自己的历史，因此「上一版」是按部件给出的（`xl_cache` / `xl_context` 的 `previous` 数组）。最新一版是计划通道的「既有实现」，版本一变 `promptHash` 的输入也就变了。
+* `--clean` 先归档再删除本次计划的所有产物，然后按 `reuse=false` 重新生成：产物从源重建，历史仍然保留（`--no-cache` 时归档关闭，只删不存）。
 * 缓存是**尽力而为**：只计划不落盘（`xl_plan`、`xl build -t <其它语言>`）不会建出 cache 目录；cache 写失败不影响已经写好的产物。
 * 产物被手工修改（头在、内容哈希与 cache 记录不符）→ 覆盖前打印警告 `E2003`；`--dry-run` 时同样提示，只是不写盘。`--no-cache` 时无从判断，因此不报告。
 
@@ -269,7 +270,8 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 * 每个「源 × 目标」一行：`[<目标>] <源> -> <产物路径…> (<状态><— 原因>)`。状态是 `generated` / `skipped` / `planned` / `failed`。
 * 末尾一行汇总：`✔|✖ build done in <秒>s — <写盘数> written, <跳过数> skipped[, <计划数> planned], <错误数> error(s)`。
 * 诊断一律写到 **stderr**：`<path>:<line>:<col>: <severity>[<code>]: <message>`，`--format pretty`（缺省）另附源码行、`^` 下划线与 `help:` 行；`--format compact` 每行一条。
-* `--quiet` 略去进度行与汇总，只保留 error 级诊断；`--verbose` 额外把计划行与「选项被接受但无效」的提示写到 stderr。
+* `--quiet` 略去进度行与汇总，只保留 error 级诊断；`--verbose` 额外把计划行与「选项被接受但无效」的提示写到 stderr。两者也可以由 `XL_LOG=silent` / `error` / `debug` 设置（显式 flag 优先）。
+* 颜色：`--color always`（或 `FORCE_COLOR`，或 `auto` 下 stdout / stderr 是 TTY）时，诊断的 `severity[code]` 与汇总的 ✔ / ✖ 带 ANSI 颜色；`NO_COLOR` 与 `--color never` 关闭。`--json` 事件流永不带颜色。
 * `--dry-run`：只输出计划（`planned`），不写盘、不建 cache。
 * `--stdout`：ts 产物（含头）写 stdout、不落盘；计划通道不受影响。
 * `--json`：stdout 变成 NDJSON 事件流（每行一个对象，`ev` 是事件名），此时不再输出任何人类可读的进度行或诊断文本。
@@ -309,7 +311,7 @@ cpp	plan	.h,.cpp	type
 | 2 | 用法错误（未知命令 / 未知选项 / 无输入 / 路径不存在 `E0001` / 没匹配到输入 `E0002` / 非法 `--target` `E0003` / 未声明扩展名或部件表的自定义目标 `E0004`） |
 
 > `xl` 不返回 3 / 4：计划通道的失败由会话里的 `xl_emit` 以 `E4002` 表达（[`xl-check.md`](./xl-check.md) §5）。
-> `--ignore` 会把这些码从计数里移除，因此 `--ignore E2002` 之类可以在写盘失败后仍然返回 0——只有计划路径冲突（`E2001`）在冲突阶段就无条件返回 1。
+> `--ignore` 只对解析 / 检查层的码生效；产物层的 `E2001` / `E2002` / `E2003` 写进 `--ignore` 也会照常计数，写盘失败或输出冲突一律退出 1。
 
 ---
 
@@ -349,6 +351,7 @@ cpp	plan	.h,.cpp	type
 ```
 
 * 自定义目标必须给 `targets.<lang>.ext`（等价于 `parts: [{ "role": "file", "ext": … }]`）或 `parts`；两者都没有是用法错误 `E0004`，退出码 2。`parts` 里 `role` 是部件名（缺省 `part1`、`part2`…，同一目标内唯一），`ext` 必填（可省前导点），`requires` 只认 `"bodies"`，`scope` 只认 `"declaration"` / `"definition"`。
+* `build.target` 是缺省目标（字符串或数组），优先级高于部署侧的 `defaultTargets`。
 * `build.naming` 不做取值校验：除 `preserve` 之外的一切写法都按 `idiomatic` 处理（命令行上的 `--naming` 会校验，非法值退出码 2）。
 * `build.header` 只有写 `false` 才关掉产物头；关掉后产物正文之前不再有空行。
 * `build.cacheVersions` 接受数字、`false` / `0`（关闭归档）；其它值（非数字、负数）退回缺省 5，小数向下取整。
@@ -361,16 +364,18 @@ cpp	plan	.h,.cpp	type
 
 ## 5. 环境变量
 
-优先级一律是 **CLI 参数 > 环境变量 > `xl.json` > 内置缺省**——但**环境变量这一级只有 `xl build` 应用**：`XL_TARGET` / `XL_OUT` 在 `xl build` 的入口合并进配置；`xl check`、`xl_plan` / `xl_build` 工具与 `xl_context` / `xl_cache` / `xl_verify` / `xl_emit` 都只读 `xl.json`（`XL_CONFIG` / `XL_CACHE_DIR` 例外，它们在任何入口都生效）。
+优先级一律是 **CLI 参数 > 环境变量 > `xl.json` > 内置缺省**，所有入口（`xl build` / `xl check` / `xl targets` 与七个 `xl_*` 工具）都按同一套规则合并。
 
 | 变量 | 作用 |
 | --- | --- |
-| `XL_TARGET` | 缺省 `-t`（逗号分隔，如 `ts,csharp`）；只对 `xl build` 生效 |
-| `XL_OUT` | 缺省 `-o`；只对 `xl build` 生效 |
+| `XL_TARGET` | 缺省 `-t`（逗号分隔，如 `ts,csharp`） |
+| `XL_OUT` | 缺省 `-o` |
 | `XL_CONFIG` | 显式指定配置文件路径（不可读或非法时以退出码 1 报错，而不是 2） |
-| `XL_CACHE_DIR` | 增量缓存与历史版本 cache 的根，覆盖 `build.cacheDir`；所有入口都生效 |
+| `XL_CACHE_DIR` | 增量缓存与历史版本 cache 的根，覆盖 `build.cacheDir` |
+| `XL_LOG` | `silent` / `error`（等价 `-q`）、`debug`（等价 `--verbose`）、`info`（缺省）；显式的 `-q` / `--verbose` 优先 |
+| `NO_COLOR` / `FORCE_COLOR` | 标准化的关色 / 强制着色（`--color` 优先于两者） |
 
-> `XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` / `XL_HARNESS`：帮助文本或早期设计里出现过，**本实现不读取**。需要安静输出用 `-q`，需要调试输出用 `--verbose`。
+> `XL_TIMEOUT` / `XL_CONCURRENCY` / `XL_HARNESS` 属于早期「xl 自己 spawn harness」的设计，本实现不读取。
 
 ---
 
@@ -393,7 +398,7 @@ using System.Text.Json;
 demo 包；按目标语言惯例生成命名空间。
 
 # method distance:(a:point, b:point)=>float
-两点距离；模块级声明必须排在类型声明之前。
+两点距离；模块级声明可以排在类型声明之前或之后。
 ```ts
 return Math.hypot(a.x - b.x, a.y - b.y);
 ```

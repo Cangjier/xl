@@ -11,6 +11,13 @@
  * @property {(text: string) => void} err - stderr writer.
  */
 
+/** ANSI SGR codes used when colour is on. */
+const SGR = {
+  error: '31', // red
+  warning: '33', // yellow
+  ok: '32', // green
+}
+
 /**
  * Create one invocation's writer.
  *
@@ -23,17 +30,27 @@
  * @param {boolean} [options.verbose] - add debug lines to stderr.
  * @param {boolean} [options.json] - write an NDJSON event stream to stdout.
  * @param {string | undefined} [options.format] - `pretty`, `compact`, or `json`.
+ * @param {boolean} [options.color] - whether to emit ANSI colour.
  * @returns {object} the writer.
  */
-export function createWriter({ io, quiet = false, verbose = false, json = false, format }) {
+export function createWriter({ io, quiet = false, verbose = false, json = false, format, color = false }) {
   const ndjson = json || format === 'json'
   const compact = format === 'compact'
   const write = text => io.out.write(`${text}\n`)
   const writeErr = text => io.err.write(`${text}\n`)
+  /**
+   * Wrap text in an ANSI SGR sequence when colour is on.
+   * @param {string} text - text to style.
+   * @param {'error' | 'warning' | 'ok'} kind - which SGR code to use.
+   * @returns {string} the styled text.
+   */
+  const paint = (text, kind) => (color ? `\u001b[${SGR[kind] ?? '0'}m${text}\u001b[0m` : text)
   return {
     ndjson,
     quiet,
     verbose,
+    color,
+    paint,
 
     /**
      * Emit one NDJSON event; a no-op without `--json`.
@@ -102,7 +119,8 @@ export function createWriter({ io, quiet = false, verbose = false, json = false,
         return
       }
       if (quiet && item.severity !== 'error') return
-      const head = `${item.file}:${item.line}:${item.col}: ${item.severity}[${item.code}]: ${item.msg}`
+      const label = paint(`${item.severity}[${item.code}]`, item.severity === 'warning' ? 'warning' : 'error')
+      const head = `${item.file}:${item.line}:${item.col}: ${label}: ${item.msg}`
       writeErr(head)
       if (compact) return
       const line = sourceLines?.[item.line - 1]

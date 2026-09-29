@@ -161,6 +161,10 @@ function renderEnum(decl) {
 
 /**
  * Render one interface member (xl-emit-ts §6.2).
+ *
+ * A `property` member is a property signature. It is `readonly` only when the
+ * source gives no setter: a property with no accessor at all means "both are
+ * supported" (xl-syntax §14), so it stays writable.
  * @param {object} member - the member.
  * @returns {string} the member line.
  */
@@ -168,6 +172,10 @@ function renderInterfaceMember(member) {
   if (member.kind === 'field') {
     const readonly = member.modifiers.includes('readonly') ? 'readonly ' : ''
     return `${readonly}${member.name}${member.optional ? '?' : ''}: ${mapType(member.type)};`
+  }
+  if (member.kind === 'property') {
+    const readonly = member.accessors.some(accessor => accessor.kind === 'set') ? '' : 'readonly '
+    return `${readonly}${member.name}: ${mapType(member.type)};`
   }
   const returns = member.async ? promiseOf(mapType(member.returns)) : mapType(member.returns)
   return `${member.name}${renderTypeParams(member.typeParams)}(${renderParams(member.params)}): ${returns};`
@@ -179,8 +187,9 @@ function renderInterfaceMember(member) {
  * @returns {string[]} rendered lines.
  */
 function renderInterface(decl) {
+  const generics = renderTypeParams(decl.typeParams)
   const extension = decl.extends === null ? '' : ` extends ${decl.extends}`
-  const lines = [`${exportPrefix(decl)}interface ${decl.name}${extension} {`]
+  const lines = [`${exportPrefix(decl)}interface ${decl.name}${generics}${extension} {`]
   for (const member of decl.members) lines.push(`${INDENT}${renderInterfaceMember(member)}`)
   lines.push('}')
   return lines

@@ -22,7 +22,7 @@ xl check [paths...] [options]
 | 过滤 | `--ignore <codes>` | 忽略指定规则码，逗号分隔，如 `--ignore W3011,E1107`；可重复，累加 |
 | 输出 | `--format <fmt>` | `pretty`（缺省）\| `compact` \| `json` |
 | 输出 | `--json` | NDJSON 诊断流（等价 `--format json`） |
-| 输出 | `--color <when>` | `auto`（缺省）\| `always` \| `never`；**接受但不生效**（输出不带 ANSI 颜色） |
+| 输出 | `--color <when>` | `auto`（缺省，跟随 TTY）\| `always` \| `never`；`NO_COLOR` / `FORCE_COLOR` 同样生效 |
 | 全局 | `--cwd <dir>` | 以指定目录为基准解析路径与配置 |
 | 全局 | `-q, --quiet` | 只输出 error（warning 级诊断不打印，计数与退出码不变） |
 | 全局 | `--verbose` | 接受但**当前不产生任何额外输出** |
@@ -137,7 +137,7 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 | `E1002` | error | 未知一级段落种类（合法：`dependencies` / `namespace` / `type` / `const` / `method` / `enum` / `interface` / `class` / `statement`） | `# struct point` | 换成合法关键字，见语法 §2 |
 | `E1003` | error | `# namespace` 名字缺失或非法 | `# namespace` / `# namespace 9a` | 名字用小写标识符，如 `# namespace demo` |
 | `E1004` | error | `# dependencies` 不是第一个段落，或出现两次（语法 §0：必须第一个、至多一次） | `# namespace demo` 之后又出现 `# dependencies` | 把 `# dependencies` 移到文件最前面 |
-| `E1005` | error | `# namespace` 出现两次；或模块级声明（`type` / `const` / `method`）出现在 `enum` / `interface` / `class` 之后。`# statement` 不参与这条判定 | 模块级 `# method` 出现在 `# class` 之后 | 按语法 §0 的骨架重排：`dependencies → namespace → 模块级声明 → 类型声明` |
+| `E1005` | error | `# namespace` 出现两次。声明之间**没有顺序要求**，所以一条 `# method` 排在 `# class` 之后是合法的 | `# namespace a` 之后又出现 `# namespace b` | 只保留一个 `# namespace`；`# dependencies` 的顺序问题由 `E1004` 报 |
 | `E1006` | error | `# dependencies` 的 `xl` 块行非法：不是 `import { … } from "./x.xl.md"`、目标是绝对路径或不是 `*.xl.md`、依赖文件读不到 / 不是合法的 `*.xl.md`、或导入名在目标文件里没有对应的一级声明 | `import { nope } from "./util.xl.md"` | 检查相对路径与导出名；依赖文件本身不参与构建，但必须可解析 |
 
 **B. 声明层**
@@ -145,8 +145,8 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 | 码 | 级别 | 规则 | 触发示例 | help |
 | --- | --- | --- | --- | --- |
 | `E1101` | error | `# type` / `# enum` / `# class` / `# interface` 名字缺失或非法 | `# class` / `# interface 2fa` | 名字用标识符（与产物 `export class point` 一致） |
-| `E1102` | error | interface 相关：`# interface … implements …`；`## constructor` 出现在 interface；interface 成员不是 `field` / `method`（如 `## property`）；interface 成员带初始值 | `# interface a implements b` | interface 只描述签名；实现放到 `# class` |
-| `E1103` | error | 泛型参数非法：括号不配对、形态不是 `<T>` / `<T extends X>` / `<K extends string, V = any>`、约束或默认值为空；或 interface 写了泛型参数 | `# class c<T extends>` / `# interface a<T>` | 每个参数写成 `名字 [extends 约束] [= 默认值]` |
+| `E1102` | error | interface 相关：`# interface … implements …`；`## constructor` 出现在 interface；interface 成员种类不是 `field` / `property` / `method`；interface 成员带初始值 | `# interface a implements b` | interface 只描述签名；实现放到 `# class` |
+| `E1103` | error | 泛型参数非法：括号不配对、形态不是 `<T>` / `<T extends X>` / `<K extends string, V = any>`、约束或默认值为空 | `# class c<T extends>` / `# interface a<T,>` | 每个参数写成 `名字 [extends 约束] [= 默认值]` |
 | `E1104` | error | `extends` 写了但基类型为空；或 `extends` / `implements` 的目标在本次检查范围内不存在（同文件与依赖都算；`int` / `Array` 等内置类型名除外） | `# class box extends pointt` / `# class box extends` | 补声明，或修正拼写 |
 | `E1105` | **warning** | `implements` 后没有名字；interface 的 `extends` 指向 class；`implements` 指向的不是 interface；class 未实现 interface 的成员（可选字段不强制）；成员参数个数不一致 | `# class box implements marker` 且 `marker` 是 class | 让目标成为 `# interface`，并补齐 `print(): string` 之类的成员 |
 | `E1106` | error | 同一文件内一级声明重名（`# statement` 不声明名字，不参与） | 两个 `# class point` | 改名；同一源文件内符号必须唯一 |
@@ -167,8 +167,8 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 | `E1206` | error | `constructor` 形态非法、返回类型不是 `void`，或一个类里有多个 `constructor` | `## constructor:(x:int)=>int` | 返回类型固定 `void`，一个类至多一个 |
 | `E1207` | error | 内联初始值与标量声明类型明显不符（只判 `int` / `float` / `double` / `number`、`bool` / `boolean`、`string` 三类） | `## field x:int = "0"` / `## field flag:bool = 3` | 改正初始值或类型标注 |
 | `E1208` | error | 参数非法：缺 `(`、括号不配对、参数缺类型或名字、`?` 与默认值同时写、必选参数排在可选参数之后 | `# method m:(a:int, b?)=>void` | 写成 `(a:int, b?:int)`，必选参数在前 |
-| `E1209` | error | `property` 既无 `### get` 也无 `### set`；或 `### get` / `### set` 出现在非 `property` 成员下 | `## property label:string` 后没有访问器 | 补 `### get` / `### set`，或把它改成 `## field` |
-| `E1210` | error | `### get` / `### set` 重复，或 `### set` 排在 `### get` 之前 | 两个 `### get` | 每个访问器至多一次，顺序固定 get → set |
+| `E1209` | error | `### get` / `### set` 出现在非 `property` 成员下（`property` 本身不挂访问器是合法的，等价于读写都开） | `## method m:()=>void` 之后的 `### get` | 删掉该访问器；它只能挂在 `## property` 下 |
+| `E1210` | error | `### get` / `### set` 重复（顺序任意，`set` 写在 `get` 之前不报错） | 两个 `### get` | 每个访问器至多一次 |
 | `E1211` | error | 同一处写了多个可见性修饰符（`public` / `protected` / `private` 互斥，至多一个） | `## public private field x:int = 0` | 只保留一个 |
 | `E1212` | error | enum 成员行以 `-` 开头但不是 `- case <name>` / `- case <name> = <原文>` | `- red` / `- case` / `- case green =` | 写成 `- case <name>` 或 `- case <name> = <原文>`（语法 §9） |
 
@@ -188,7 +188,7 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 
 | 码 | 级别 | 规则 | help |
 | --- | --- | --- | --- |
-| `W3010` | warning | 只对**请求的非 ts 目标**逐个报告：模块级 `# method`、类的 `## method` / `## constructor`、以及「无初始值且访问器无体」的 `property` 访问器，在没有默认语言（ts）代码块、也没有该目标的 `### <target>` 段时触发。`# statement` 的规则略有不同：无 ts 块但有语言段时，目标里含 `ts` 也报（那一段会从 ts 产物里整段消失） | 补一个 `ts` 默认语言代码块，或加 `### csharp` / `## csharp` 指示 |
+| `W3010` | warning | 只对**请求的非 ts 目标**逐个报告：模块级 `# method`、类的 `## method` / `## constructor`、以及「无初始值、显式写了访问器但访问器无体」的 `property` 访问器，在没有默认语言（ts）代码块、也没有该目标的 `### <target>` 段时触发。**不挂访问器的 property 默认就是读写直通，不报**。`# statement` 的规则略有不同：无 ts 块但有语言段时，目标里含 `ts` 也报（那一段会从 ts 产物里整段消失） | 补一个 `ts` 默认语言代码块，或加 `### csharp` / `## csharp` 指示 |
 | `W3011` | warning | `### <lang>` / `## <lang>` 只有说明文字、没有代码块——合法但生成信息量低 | 补该语言的代码块，或删掉空壳子标题 |
 | `W3012` | warning | 代码块为空（围栏之间只有空白） | 补内容，或删除该代码块 |
 | `W3013` | warning | `# statement` 的默认语言块里出现静态顶层 `import`（或带 `from` 的 `export`）：它会被提升到产物头之前 | 把依赖写进 `# dependencies`（语法 §4），默认语言块里只留可执行语句 |
@@ -229,6 +229,7 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 | `E4002` | error | `xl_emit` 提交的内容过不了结构回读：计划内的某个产物没有提交，或产物的类型集合 / 成员名集合 / 参数个数与 IR 不一致（定义部件只校验它提到的成员） | 收敛生成上下文（补 `## <lang>` 指示），或放宽该目标的校验 |
 
 * 退出码：`E2001` / `E2002` 为 1；`E2003` 只提示；`E4002` 由 `xl_emit` 返回给会话（`xl build` 本身不产生它，也从不返回 3 / 4）。
+* `E2001` / `E2002` / `E2003` **不受 `--ignore` 影响**：写盘失败与输出冲突不是作者可以豁免的规则，`xl build --ignore E2002` 仍然以 1 退出（[`xl-cli.md`](./xl-cli.md) §3.8）。
 * `xl_emit` 只要有一个文件不通过就**一个都不写**，agent 修完再调一次即可。
 * 一个源文件失败不影响其它源文件，也不影响已成功产物的写入。
 
@@ -248,12 +249,12 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 
 | 手段 | 作用 |
 | --- | --- |
-| `--ignore <codes>` | 本次忽略指定规则码：解析 / 检查层的码直接从结果里移除；产物层的码（`E2001` / `E2002` / `E2003`）仍会打印，但不参与计数 |
+| `--ignore <codes>` | 本次忽略指定规则码（解析 / 检查层的码直接从结果里移除，不打印也不计数） |
 | `check.ignore` | 配置文件里持久忽略 |
 | `--strict` / `check.strict` | warning 提升为失败（只影响 `xl check`） |
 | `--max-warnings <n>` / `check.maxWarnings` | warning 数量上限（只影响 `xl check`） |
 
-> 因为产物层的码只被排除在计数之外，`xl build --ignore E2002` 之类可以在写盘失败后仍然返回 0；只有计划路径冲突（`E2001` 的冲突分支）在冲突阶段就无条件返回 1（[`xl-cli.md`](./xl-cli.md) §3.8）。
+> 产物层的 `E2001` / `E2002` / `E2003` 不受忽略影响：即使写进 `--ignore` / `check.ignore` 也照常计数，`xl build` 该失败就失败（[`xl-cli.md`](./xl-cli.md) §3.8）。
 
 * 行内抑制**不存在**：xl 不支持 `// xl-ignore` 之类的注释——注释放进默认语言块会被原样带进产物。需要豁免时用 `--ignore` / `check.ignore`，或直接修正源文件。
 * `--quiet` 只影响输出（只留 error 级诊断），不影响退出码与 `--json` 的事件流。

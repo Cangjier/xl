@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { XL_VERSION } from './emit-ts.js'
+import { resolveOutput } from './plan.js'
 import { toPosix } from './text.js'
 
 /** Serialized cache format version. */
@@ -39,11 +40,13 @@ export class BuildCache {
    * @param {string} options.cwd - working directory the invocation resolves against.
    * @param {string} options.root - absolute cache root, normally `<out>/<lang>/.xl`.
    * @param {number} options.versions - how many historical versions to keep; `0` disables the archive.
+   * @param {boolean} [options.enabled] - whether the store archives and records at all.
    */
-  constructor({ cwd, root, versions }) {
+  constructor({ cwd, root, versions, enabled = true }) {
     this.cwd = cwd
     this.root = root
     this.versions = versions
+    this.enabled = enabled
     this.file = join(root, 'cache.json')
     this.archiveRoot = join(root, 'cache')
     /** @type {Record<string, object>} */
@@ -135,8 +138,8 @@ export class BuildCache {
    * @returns {string | null} the archive path, or `null` when nothing was kept.
    */
   archive(sourceRel, outPath) {
-    if (this.versions <= 0) return null
-    const absolute = join(this.cwd, outPath)
+    if (!this.enabled || this.versions <= 0) return null
+    const absolute = resolveOutput(this.cwd, outPath)
     if (!existsSync(absolute)) return null
     let content
     try {
@@ -155,7 +158,7 @@ export class BuildCache {
    * @returns {string | null} the archive path, or `null` on failure.
    */
   archiveText(sourceRel, outPath, content) {
-    if (this.versions <= 0) return null
+    if (!this.enabled || this.versions <= 0) return null
     const { targetDir, base } = this.archiveBase(sourceRel)
     const extension = extensionOf(outPath)
     try {
@@ -336,7 +339,7 @@ export class BuildCacheSet {
     const root = this.rootOf(name)
     let store = this.stores.get(root)
     if (store === undefined) {
-      store = new BuildCache({ cwd: this.cwd, root, versions: this.versions })
+      store = new BuildCache({ cwd: this.cwd, root, versions: this.versions, enabled: this.enabled })
       if (this.enabled) store.load()
       this.stores.set(root, store)
     }

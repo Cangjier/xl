@@ -16,13 +16,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { BuildCacheSet } from './cache.js'
-import { cacheRoot, loadConfig, resolveBuildOptions } from './config.js'
+import { cacheRoot, loadConfig, mergeEnv, resolveBuildOptions } from './config.js'
 import { checkDeclaredTargets, checkDocument } from './check.js'
 import { countBySeverity, dedupeDiagnostics, diag, sortDiagnostics } from './diagnostics.js'
 import { XL_VERSION, printTypeScriptFile } from './emit-ts.js'
 import { fingerprintSource, isArtifact, parseArtifactHeader, renderHeader } from './header.js'
 import { parseXlMd } from './parse.js'
-import { detectConflicts, planSource } from './plan.js'
+import { detectConflicts, planSource, resolveOutput } from './plan.js'
 import { collectSources, readIgnorePatterns } from './scan.js'
 import { loadSource } from './source.js'
 import { UsageError, canonicalLang, resolveTargets, typeFileBaseName } from './targets.js'
@@ -213,7 +213,14 @@ export function planWorkspace(prepared, { targets, options, cache, cwd }) {
       plan.summary = structureSummary(entry.doc)
       plan.context = languageContext(entry.doc, target, prepared, entry.src)
       plan.fingerprint = fingerprintSource(entry.text)
-      plan.reuse = reuseDecision({ cwd: cwd ?? prepared.cwd, plan, target, fingerprint: plan.fingerprint, force: options.force === true })
+      plan.reuse = reuseDecision({
+        cwd: cwd ?? prepared.cwd,
+        plan,
+        target,
+        fingerprint: plan.fingerprint,
+        force: options.force === true,
+        clean: options.clean === true,
+      })
       // One previous version per extension: a multi-part target (C++ `.h` and
       // `.cpp`) keeps its two histories side by side, and a single-part target
       // reports exactly the pointer it always did. No text is read here — the
@@ -301,12 +308,14 @@ export function languageContext(doc, target, prepared, src) {
  * @param {object} input.target - target descriptor.
  * @param {string} input.fingerprint - current source fingerprint.
  * @param {boolean} input.force - whether `--force` discards the decision.
+ * @param {boolean} [input.clean] - whether `--clean` discards the decision.
  * @returns {{reusable: boolean, reason: string | null}} the decision.
  */
-function reuseDecision({ cwd, plan, target, fingerprint, force }) {
+function reuseDecision({ cwd, plan, target, fingerprint, force, clean }) {
   if (force) return { reusable: false, reason: 'forced' }
+  if (clean) return { reusable: false, reason: 'cleaned' }
   for (const output of plan.outputs) {
-    const absolute = join(cwd, output.path)
+    const absolute = resolveOutput(cwd, output.path)
     if (!existsSync(absolute)) return { reusable: false, reason: `missing artifact ${output.path}` }
     const header = parseArtifactHeader(readArtifact(absolute))
     if (header === null) return { reusable: false, reason: `${output.path} has no xl header` }
@@ -344,26 +353,15 @@ export function runBuild(input) {
   const cwd = input.cwd
   const env = input.env ?? process.env
   const loaded = input.config === undefined ? loadConfig(cwd, env) : { config: input.config, file: null }
-  const merged = { ...loaded.config, build: { ...loaded.config.build, ...envOverrides(env) } }
+  const merged = mergeEnv(loaded.config, env)
   const options = resolveBuildOptions({ config: merged, cli: input.cli ?? {} })
   const targets = resolveTargets(options.targets, merged)
   const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [] })
   return buildPrepared({ cwd, prepared, targets, options, config: merged, env, loaded })
 }
 
-/**
- * Environment overrides limited to the fields the build reads.
- * @param {object} env - environment snapshot.
- * @returns {object} the override document.
- */
-function envOverrides(env) {
-  const out = {}
-  if (env.XL_TARGET !== undefined && env.XL_TARGET !== '') {
-    out.target = env.XL_TARGET.split(',').map(part => part.trim()).filter(part => part !== '')
-  }
-  if (env.XL_OUT !== undefined && env.XL_OUT !== '') out.out = env.XL_OUT
-  return out
-}
+/** Codes the artifact layer reports; `--ignore` cannot silence them. */
+const UNIGNORABLE_CODES = new Set(['E2001', 'E2002', 'E2003'])
 
 /**
  * Produce the artifacts for a prepared workspace.
@@ -379,7 +377,9 @@ function envOverrides(env) {
  */
 export function buildPrepared({ cwd, prepared, targets, options, config, env, loaded }) {
   const started = Date.now()
-  const ignore = options.checkIgnore ?? new Set()
+  // A write failure or an output conflict is not a rule the author can waive,
+  // so those codes stay out of the ignore set: the run must still fail.
+  const ignore = new Set([...(options.checkIgnore ?? [])].filter(code => !UNIGNORABLE_CODES.has(code)))
   const diagnostics = checkWorkspace(prepared, { targets, ignore })
   const counts = countBySeverity(diagnostics, ignore)
   const result = {
@@ -398,6 +398,7 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
     ms: 0,
     stdout: [],
     exitCode: 0,
+    failed: false,
   }
   if (counts.errors > 0) {
     result.ms = Date.now() - started
@@ -435,6 +436,15 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
     return result
   }
 
+  // `--clean` removes the products of this run before anything is produced, so
+  // the run starts from the source alone. Each removed product is archived
+  // first, so a clean build still keeps the history the plan channel reads
+  // ("the implementation to extend"). A dry run or a stdout run produces
+  // nothing and therefore deletes nothing.
+  if (options.clean === true && options.dryRun !== true && options.stdout !== true) {
+    cleanPlannedOutputs({ cwd, plans, cache })
+  }
+
   for (const plan of plans) {
     const entry = prepared.entries.find(item => item.src === plan.src)
     if (entry === undefined) continue
@@ -452,7 +462,7 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
       const outputs = result.files.filter(file => file.src === plan.src && file.target === plan.target)
       const written = outputs.flatMap(file => file.out)
       if (written.length === 0) continue
-      const content = written.map(path => readArtifact(join(cwd, path))).join('\u0000')
+      const content = written.map(path => readArtifact(resolveOutput(cwd, path))).join('\u0000')
       cache.for(plan.target).set(plan.src, plan.target, {
         fingerprint: plan.fingerprint,
         out: written,
@@ -466,10 +476,36 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
   const finalCounts = countBySeverity(result.diagnostics, ignore)
   result.errors = finalCounts.errors
   result.warnings = finalCounts.warnings
-  result.ok = result.errors === 0
+  // A write failure or an output conflict is never maskable by `--ignore`: the
+  // diagnostic may be ignored for counting, but the run did not do its job.
+  result.ok = result.errors === 0 && !result.failed
   result.ms = Date.now() - started
-  result.exitCode = result.errors > 0 ? 1 : 0
+  result.exitCode = result.ok ? 0 : 1
   return result
+}
+
+/**
+ * Archive and delete every planned output that exists, for `--clean`.
+ * @param {object} input - the clean input.
+ * @param {string} input.cwd - working directory.
+ * @param {readonly object[]} input.plans - the plans of this run.
+ * @param {import('./cache.js').BuildCacheSet} input.cache - the per-language stores.
+ * @returns {void}
+ */
+function cleanPlannedOutputs({ cwd, plans, cache }) {
+  for (const plan of plans) {
+    const store = cache.for(plan.target)
+    for (const output of plan.outputs) {
+      const absolute = resolveOutput(cwd, output.path)
+      if (!existsSync(absolute)) continue
+      store.archive(plan.src, output.path)
+      try {
+        rmSync(absolute)
+      } catch {
+        // A file that cannot be removed is reported by the write below.
+      }
+    }
+  }
 }
 
 /**
@@ -532,7 +568,7 @@ function processPlan({ cwd, plan, target, entry, options, cache, result }) {
       reason: 'dry run',
     }
   }
-  const absolute = join(cwd, output.path)
+  const absolute = resolveOutput(cwd, output.path)
   if (!options.force && existsSync(absolute)) {
     const existing = readArtifact(absolute)
     if (!isArtifact(existing)) {
@@ -543,6 +579,7 @@ function processPlan({ cwd, plan, target, entry, options, cache, result }) {
         msg: `output conflict: ${output.path} exists and is not an xl artifact (use --force to overwrite)`,
       }))
       result.errors += 1
+      result.failed = true
       return {
         src: plan.src,
         target: plan.target,
@@ -557,13 +594,6 @@ function processPlan({ cwd, plan, target, entry, options, cache, result }) {
   // Archive the version being replaced before the write; the newest archived
   // version is what the non-ts channel offers as the implementation to extend.
   cache.archive(plan.src, output.path)
-  if (options.clean === true && existsSync(absolute)) {
-    try {
-      rmSync(absolute)
-    } catch {
-      // A file that cannot be removed is overwritten below anyway.
-    }
-  }
   try {
     mkdirSync(dirname(absolute), { recursive: true })
     writeFileSync(absolute, artifact, 'utf8')
@@ -575,6 +605,7 @@ function processPlan({ cwd, plan, target, entry, options, cache, result }) {
       msg: `cannot write ${output.path}: ${error instanceof Error ? error.message : String(error)}`,
     }))
     result.errors += 1
+    result.failed = true
     return {
       src: plan.src,
       target: plan.target,
@@ -610,7 +641,7 @@ function processPlan({ cwd, plan, target, entry, options, cache, result }) {
  * @param {object} input.result - the build result collecting diagnostics.
  */
 function warnHandEdited({ cwd, plan, path, cache, result }) {
-  const absolute = join(cwd, path)
+  const absolute = resolveOutput(cwd, path)
   if (!existsSync(absolute)) return
   const existing = readArtifact(absolute)
   if (!isArtifact(existing)) return
@@ -640,8 +671,9 @@ export function runCheck(input) {
   const cwd = input.cwd
   const env = input.env ?? process.env
   const loaded = loadConfig(cwd, env)
-  const options = resolveBuildOptions({ config: loaded.config, cli: input.cli ?? {} })
-  const targets = resolveTargets(options.targets, loaded.config)
+  const config = mergeEnv(loaded.config, env)
+  const options = resolveBuildOptions({ config, cli: input.cli ?? {} })
+  const targets = resolveTargets(options.targets, config)
   const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [] })
   const ignore = options.checkIgnore ?? new Set()
   const diagnostics = checkWorkspace(prepared, { targets, ignore })
@@ -675,8 +707,9 @@ export function runPlan(input) {
   const cwd = input.cwd
   const env = input.env ?? process.env
   const loaded = loadConfig(cwd, env)
-  const options = resolveBuildOptions({ config: loaded.config, cli: input.cli ?? {} })
-  const targets = resolveTargets(options.targets, loaded.config)
+  const config = mergeEnv(loaded.config, env)
+  const options = resolveBuildOptions({ config, cli: input.cli ?? {} })
+  const targets = resolveTargets(options.targets, config)
   const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [] })
   const ignore = options.checkIgnore ?? new Set()
   const diagnostics = checkWorkspace(prepared, { targets, ignore })
@@ -687,7 +720,7 @@ export function runPlan(input) {
   const cache = new BuildCacheSet({
     cwd,
     versions: options.cacheVersions,
-    rootOf: name => cacheRoot(cwd, env, loaded.config, { out: options.out, target: name }),
+    rootOf: name => cacheRoot(cwd, env, config, { out: options.out, target: name }),
   })
   const plans = planWorkspace(prepared, { targets, options, cache, cwd })
   return {
@@ -712,11 +745,12 @@ export function runPlan(input) {
 export function resolveRequestedTargets(input) {
   const env = input.env ?? process.env
   const loaded = loadConfig(input.cwd, env)
+  const config = mergeEnv(loaded.config, env)
   const requested = input.targets !== undefined && input.targets.length > 0
     ? input.targets
-    : (loaded.config.build?.target ?? ['ts'])
+    : (config.build?.target ?? ['ts'])
   const list = Array.isArray(requested) ? requested : [requested]
-  return { targets: resolveTargets(list, loaded.config), config: loaded.config }
+  return { targets: resolveTargets(list, config), config }
 }
 
 export { UsageError, canonicalLang, resolveTargets, typeFileBaseName, structureSummary }

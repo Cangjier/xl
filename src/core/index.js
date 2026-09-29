@@ -29,7 +29,16 @@ export {
   runPlan,
 } from './build.js'
 export { checkDeclaredTargets, checkDocument, languageNamesOf, overrideSections } from './check.js'
-export { cacheRoot, DEFAULTS, deepMerge, envConfig, findConfigFile, loadConfig, resolveBuildOptions } from './config.js'
+export {
+  cacheRoot,
+  DEFAULTS,
+  deepMerge,
+  envOverrides,
+  findConfigFile,
+  loadConfig,
+  mergeEnv,
+  resolveBuildOptions,
+} from './config.js'
 export {
   countBySeverity,
   dedupeDiagnostics,
@@ -69,7 +78,15 @@ export {
   parseArtifactHeader,
   renderHeader,
 } from './header.js'
-export { detectConflicts, outputRoot, plannedParts, planSource, sourceBaseName, unitNeedsBodies } from './plan.js'
+export {
+  detectConflicts,
+  outputRoot,
+  plannedParts,
+  planSource,
+  resolveOutput,
+  sourceBaseName,
+  unitNeedsBodies,
+} from './plan.js'
 export {
   collectSources,
   expandBraces,

@@ -192,6 +192,9 @@ function checkTargetHints(doc, targets, emit) {
       }
       if (member.kind !== 'property') continue
       for (const accessor of member.accessors) {
+        // A property that names no accessor is a synthesized pass-through pair:
+        // it describes itself, so it needs no `### <target>` hint.
+        if (accessor.synthesized === true) continue
         if (accessor.body !== null || member.defaultValue !== undefined) continue
         members.push({
           node: accessor,

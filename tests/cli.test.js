@@ -170,6 +170,36 @@ test('xl check reports W3013 for a static import inside # statement', async () =
   }
 })
 
+test('--color always paints the summary and the diagnostic labels', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': '# struct point\n' })
+  try {
+    const result = await runCli(['check', '--color', 'always'], cwd)
+    assert.equal(result.code, 1)
+    assert.ok(result.stderr.includes('\u001b[31merror[E1002]\u001b[0m'), result.stderr)
+    assert.ok(result.stdout.includes('\u001b[31m✖\u001b[0m'), result.stdout)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('XL_LOG quietens or debugs the invocation', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  const previous = process.env.XL_LOG
+  try {
+    process.env.XL_LOG = 'silent'
+    const silent = await runCli(['build', '-t', 'ts'], cwd)
+    assert.equal(silent.code, 0)
+    assert.equal(silent.stdout, '')
+    process.env.XL_LOG = 'debug'
+    const debug = await runCli(['build', '-t', 'ts'], cwd)
+    assert.ok(debug.stderr.includes('(direct)'), debug.stderr)
+  } finally {
+    if (previous === undefined) delete process.env.XL_LOG
+    else process.env.XL_LOG = previous
+    dropWorkspace(cwd)
+  }
+})
+
 test('xl build -t csharp plans only and says who generates it', async () => {
   const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
   try {

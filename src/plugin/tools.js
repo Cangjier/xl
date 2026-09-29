@@ -72,6 +72,19 @@ const OUT_PROPERTY = {
   description: 'Output root directory. Defaults to xl.json build.out, then "dist". Every target language gets its own subdirectory, so ts lands in <out>/ts/ and csharp in <out>/csharp/.',
 }
 
+/** JSON Schema for the naming policy; it must match between plan and emit. */
+const NAMING_PROPERTY = {
+  type: 'string',
+  enum: ['idiomatic', 'preserve'],
+  description: 'Target-language naming policy for type-layout file names. Must be the same value xl_plan / xl_context used, or the planned paths will not match.',
+}
+
+/** JSON Schema for the flattened layout; it must match between plan and emit. */
+const FLAT_PROPERTY = {
+  type: 'boolean',
+  description: 'Discard the source directory hierarchy in output paths. Must be the same value xl_plan / xl_context used, or the planned paths will not match.',
+}
+
 /** Output declaration shared by every tool: a JSON object rendered as text. */
 const TEXT_OUTPUT = {
   schema: { type: 'object', additionalProperties: true },
@@ -105,11 +118,11 @@ function planTool(service) {
         targets: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Target languages, for example ["csharp"]. Defaults to xl.json build.target, then ts.',
+          description: 'Target languages, for example ["csharp"]. Defaults to xl.json build.target, then the row default, then ts.',
         },
         out: OUT_PROPERTY,
-        naming: { type: 'string', enum: ['idiomatic', 'preserve'], description: 'Target-language naming policy for type-layout file names.' },
-        flat: { type: 'boolean', description: 'Discard the source directory hierarchy in output paths.' },
+        naming: NAMING_PROPERTY,
+        flat: FLAT_PROPERTY,
         force: { type: 'boolean', description: 'Report every planned output as not reusable.' },
         cwd: CWD_PROPERTY,
       },
@@ -150,8 +163,8 @@ function contextTool(service) {
         file: FILE_PROPERTY,
         target: { type: 'string', description: 'Target language, for example "csharp".' },
         out: OUT_PROPERTY,
-        naming: { type: 'string', enum: ['idiomatic', 'preserve'], description: 'Naming policy override.' },
-        flat: { type: 'boolean', description: 'Discard the source directory hierarchy.' },
+        naming: { ...NAMING_PROPERTY, description: 'Naming policy override. Must be the same value xl_emit is called with.' },
+        flat: FLAT_PROPERTY,
         cwd: CWD_PROPERTY,
       },
       required: ['file', 'target'],
@@ -231,6 +244,7 @@ function verifyTool(service) {
       'Check proposed products against the structural contract without writing anything: the type set, the member',
       'names, and parameter counts must match the *.xl.md. Call it before xl_emit when you want the verdict',
       'separately; xl_emit verifies as part of writing.',
+      'Pass the same out / naming / flat values the plan was made with, or the planned paths will not match.',
     ].join(' '),
     parameters: {
       type: 'object',
@@ -238,6 +252,9 @@ function verifyTool(service) {
         file: FILE_PROPERTY,
         target: { type: 'string', description: 'Target language.' },
         files: FILES_PROPERTY,
+        out: OUT_PROPERTY,
+        naming: NAMING_PROPERTY,
+        flat: FLAT_PROPERTY,
         cwd: CWD_PROPERTY,
       },
       required: ['file', 'target', 'files'],
@@ -265,6 +282,7 @@ function emitTool(service) {
       'archive the version it replaced, and update the incremental cache.',
       'Supply one entry per planned output with the exact path xl_plan or xl_context returned. Supply the code only;',
       'xl adds the header.',
+      'Pass the same out / naming / flat values the plan was made with, or the planned paths will not match.',
     ].join(' '),
     parameters: {
       type: 'object',
@@ -276,6 +294,8 @@ function emitTool(service) {
         force: { type: 'boolean', description: 'Overwrite an existing non-xl file at a planned path.' },
         verify: { type: 'boolean', description: 'Verify before writing. Defaults to true.' },
         out: OUT_PROPERTY,
+        naming: NAMING_PROPERTY,
+        flat: FLAT_PROPERTY,
         cwd: CWD_PROPERTY,
       },
       required: ['file', 'target', 'files'],
