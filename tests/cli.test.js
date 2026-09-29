@@ -66,11 +66,14 @@ test('parseArgs rejects a non-numeric numeric option', () => {
 })
 
 test('validateOptions rejects a closed value outside its set', () => {
-  assert.equal(validateOptions({ layout: 'file' }).length, 0)
-  assert.equal(validateOptions({ layout: 'grid' }).length, 1)
+  assert.equal(validateOptions({ naming: 'idiomatic' }).length, 0)
   assert.equal(validateOptions({ naming: 'kebab' }).length, 1)
   assert.equal(validateOptions({ format: 'xml' }).length, 1)
   assert.equal(validateOptions({ color: 'rainbow' }).length, 1)
+})
+
+test('--layout is no longer an option', () => {
+  assert.ok(parseArgs(['build', '--layout', 'file']).errors.some(message => message.includes('--layout')))
 })
 
 /**

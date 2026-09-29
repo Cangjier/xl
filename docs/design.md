@@ -160,7 +160,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 
 | 想做的事 | 改哪里 |
 | --- | --- |
-| 加一个目标语言 | `src/core/targets.js` 的 `BUILTIN_TARGETS`；或在 `xl.json` 的 `targets.<lang>` 里声明 `ext` |
+| 加一个目标语言 | `src/core/targets.js` 的 `BUILTIN_TARGETS`；或在 `xl.json` 的 `targets.<lang>` 里声明 `ext`。自定义目标走 harness 通道，因此布局恒为 `type`，不需要（也不能）声明 layout |
 | 改 ts 打印规则 | `src/core/emit-ts.js`，同时更新 `tests/emit-ts.test.js` 与基准样例的一致性测试 |
 | 加一条诊断码 | `src/core/diagnostics.js` 的 `DIAG_CODES`，在产生它的那一层 emit，补 `tests/parse.test.js` 或 `tests/check.test.js`，再跑 `pnpm run codes` |
 | 让生成者拿到更多上下文 | `src/core/build.js` 的 `languageContext` 与 `src/core/artifact.js` 的 `contextFor`（注意 `promptHash` 的输入要同步，否则 cache 失效判定会失真） |

@@ -31,7 +31,7 @@ import {
   isArtifact,
   renderHeader,
 } from './header.js'
-import { resolveLayout, resolveTarget } from './targets.js'
+import { resolveTarget } from './targets.js'
 import { structureSummary, verifyStructure } from './verify.js'
 
 /**
@@ -71,7 +71,6 @@ export function resolveArtifactRequest({ cwd, target, options = {}, config = {} 
     options: {
       out: options.out ?? config.build?.out ?? DEFAULTS.out,
       flat: options.flat === true,
-      layout: resolveLayout(descriptor, options.layout),
       naming: options.naming ?? config.build?.naming ?? 'idiomatic',
       force: options.force === true,
       verify: options.verify !== false,
@@ -105,7 +104,7 @@ export function contextFor({ cwd, source, target, options = {}, config = {}, env
     source,
     target: resolved.target.name,
     channel: resolved.target.channel,
-    layout: plan?.layout ?? resolved.options.layout,
+    layout: plan?.layout ?? resolved.target.layout,
     outputs: plan?.outputs ?? [],
     text: entry.text,
     summary: structureSummary(entry.doc),

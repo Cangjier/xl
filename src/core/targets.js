@@ -24,14 +24,22 @@ export class UsageError extends Error {
   }
 }
 
-/** Built-in targets, keyed by canonical language name. */
+/**
+ * Built-in targets, keyed by canonical language name.
+ *
+ * The layout is a property of the target, not of an invocation: `ts` is
+ * printed by the direct channel as exactly one file per source, and every
+ * harness target is always `type` — one file per declaration. There is no
+ * override and no per-target exemption, so two runs of the same source can
+ * never disagree about which files should exist.
+ */
 export const BUILTIN_TARGETS = {
-  ts: { ext: '.ts', layout: 'file', channel: 'direct', lockLayout: false },
-  csharp: { ext: '.cs', layout: 'type', channel: 'harness', lockLayout: false },
-  java: { ext: '.java', layout: 'type', channel: 'harness', lockLayout: true },
-  python: { ext: '.py', layout: 'file', channel: 'harness', lockLayout: false },
-  go: { ext: '.go', layout: 'file', channel: 'harness', lockLayout: false },
-  rust: { ext: '.rs', layout: 'file', channel: 'harness', lockLayout: false },
+  ts: { ext: '.ts', layout: 'file', channel: 'direct' },
+  csharp: { ext: '.cs', layout: 'type', channel: 'harness' },
+  java: { ext: '.java', layout: 'type', channel: 'harness' },
+  python: { ext: '.py', layout: 'type', channel: 'harness' },
+  go: { ext: '.go', layout: 'type', channel: 'harness' },
+  rust: { ext: '.rs', layout: 'type', channel: 'harness' },
 }
 
 /** Spellings accepted for a built-in target. */
@@ -93,7 +101,6 @@ export function resolveTarget(lang, config) {
       requested: lang,
       ext: builtin.ext,
       layout: builtin.layout,
-      lockLayout: builtin.lockLayout,
       channel: builtin.channel,
       comment: commentMarkerFor(name, builtin.ext),
       namespace: config?.targets?.[name]?.namespace ?? null,
@@ -108,13 +115,13 @@ export function resolveTarget(lang, config) {
     throw new UsageError(`custom target "${name}" must declare "targets.${name}.ext" in xl.json`, 'E0004')
   }
   const ext = declared.ext.startsWith('.') ? declared.ext : `.${declared.ext}`
-  const layout = declared.layout === LAYOUT_TYPE ? LAYOUT_TYPE : LAYOUT_FILE
   return {
     name,
     requested: lang,
     ext,
-    layout,
-    lockLayout: false,
+    // A custom target uses the harness channel, and the harness channel is
+    // always `type`; a declared `targets.<lang>.layout` is read past on purpose.
+    layout: LAYOUT_TYPE,
     channel: 'harness',
     comment: commentMarkerFor(name, ext),
     namespace: declared.namespace ?? null,
@@ -187,20 +194,6 @@ export function typeFileBaseName(typeName, lang, naming, kind) {
   if (PASCAL_TARGETS.has(lang)) return toPascalCase(typeName)
   if (SNAKE_TARGETS.has(lang)) return toSnakeCase(typeName)
   return typeName
-}
-
-/**
- * Resolve the layout actually used for one target and invocation.
- * @param {object} target - target descriptor.
- * @param {string | undefined} requested - `--layout` value.
- * @returns {'file' | 'type'} the layout.
- */
-export function resolveLayout(target, requested) {
-  if (target.lockLayout) return LAYOUT_TYPE
-  if (requested !== LAYOUT_FILE && requested !== LAYOUT_TYPE) return target.layout
-  // ts has no type layout: it prints exactly one file per source.
-  if (target.name === 'ts') return LAYOUT_FILE
-  return requested
 }
 
 /**

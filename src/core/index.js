@@ -89,7 +89,6 @@ export {
   LAYOUT_TYPE,
   listTargets,
   MODULE_FILE_SUFFIX,
-  resolveLayout,
   resolveTarget,
   resolveTargets,
   SOURCE_LANG,

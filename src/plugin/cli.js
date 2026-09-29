@@ -153,7 +153,6 @@ function requestOf(parsed) {
   if (typeof options.cwd === 'string') request.cwd = options.cwd
   if (Array.isArray(options.targets)) request.targets = options.targets
   if (typeof options.out === 'string') request.out = options.out
-  if (typeof options.layout === 'string') request.layout = options.layout
   if (typeof options.naming === 'string') request.naming = options.naming
   if (options.flat === true) request.flat = true
   if (options.force === true) request.force = true

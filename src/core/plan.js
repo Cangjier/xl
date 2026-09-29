@@ -6,10 +6,11 @@
  * `build.out`, then `dist`. Every target then gets its own language directory
  * under that root — `dist/ts`, `dist/csharp`, … — so two languages never share
  * a tree and each one's cache sits beside the products it describes. A
- * `file`-layout target keeps the source's relative directory under its
- * language directory and emits one file per source; a `type`-layout target
- * emits one file per type plus one module file for the module-level
- * declarations.
+ * `file`-layout target (only `ts`) keeps the source's relative directory under
+ * its language directory and emits one file per source; a `type`-layout target
+ * (every harness target) emits one file per type plus one module file for the
+ * module-level declarations. The layout comes from the target descriptor alone:
+ * no invocation can change it.
  *
  * @module xl/core/plan
  */
@@ -98,12 +99,11 @@ function declaredNames(decls) {
  * @param {object} options - planning options.
  * @param {string | null} [options.out] - output root.
  * @param {boolean} [options.flat] - whether `--flat` discards the source directory.
- * @param {'file' | 'type'} [options.layout] - resolved layout.
  * @param {'idiomatic' | 'preserve'} [options.naming] - naming policy.
  * @returns {object} the plan: `outputs` with `path`, `base`, `kind`, and `names`.
  */
 export function planSource(doc, sourceRel, target, options) {
-  const layout = options.layout ?? target.layout
+  const layout = target.layout
   const naming = options.naming ?? 'idiomatic'
   const root = outputRoot(options.out)
   const directory = sourceDirectory(sourceRel, options.flat === true)

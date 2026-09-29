@@ -25,7 +25,7 @@ import { parseXlMd } from './parse.js'
 import { detectConflicts, planSource } from './plan.js'
 import { collectSources, readIgnorePatterns } from './scan.js'
 import { loadSource } from './source.js'
-import { UsageError, canonicalLang, resolveLayout, resolveTargets, typeFileBaseName } from './targets.js'
+import { UsageError, canonicalLang, resolveTargets, typeFileBaseName } from './targets.js'
 import { toPosix } from './text.js'
 import { structureSummary } from './verify.js'
 
@@ -205,11 +205,9 @@ export function planWorkspace(prepared, { targets, options, cache, cwd }) {
   const plans = []
   for (const entry of prepared.entries) {
     for (const target of targets) {
-      const layout = resolveLayout(target, options.layout)
       const plan = planSource(entry.doc, entry.src, target, {
         out: options.out,
         flat: options.flat === true,
-        layout,
         naming: options.naming,
       })
       plan.summary = structureSummary(entry.doc)
@@ -706,4 +704,4 @@ export function resolveRequestedTargets(input) {
   return { targets: resolveTargets(list, loaded.config), config: loaded.config }
 }
 
-export { UsageError, canonicalLang, resolveTargets, resolveLayout, typeFileBaseName, structureSummary }
+export { UsageError, canonicalLang, resolveTargets, typeFileBaseName, structureSummary }

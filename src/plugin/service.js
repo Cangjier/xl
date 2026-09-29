@@ -76,7 +76,6 @@ export function createXlService(options = {}) {
     const targets = request.targets ?? options.defaultTargets
     if (Array.isArray(targets) && targets.length > 0) cli.targets = targets
     if (typeof request.out === 'string' && request.out !== '') cli.out = request.out
-    if (request.layout === 'file' || request.layout === 'type') cli.layout = request.layout
     if (request.naming === 'idiomatic' || request.naming === 'preserve') cli.naming = request.naming
     if (Array.isArray(request.ignore) && request.ignore.length > 0) cli.ignore = request.ignore
     if (typeof request.strict === 'boolean') cli.strict = request.strict
@@ -224,7 +223,6 @@ export function createXlService(options = {}) {
 function optionBag(request) {
   return {
     out: request.out,
-    layout: request.layout,
     naming: request.naming,
     flat: request.flat,
     force: request.force,

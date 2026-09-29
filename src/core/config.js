@@ -184,7 +184,6 @@ export function resolveBuildOptions({ config, cli }) {
   return {
     targets,
     out: cli.out ?? build.out ?? DEFAULTS.out,
-    layout: cli.layout ?? null,
     flat: cli.flat === true,
     naming: cli.naming ?? build.naming ?? DEFAULTS.naming,
     concurrency: cli.concurrency ?? build.concurrency ?? DEFAULTS.concurrency,

@@ -86,13 +86,15 @@ dsh plugin --profile web remove xl
 
 | 工具 | 作用 | 关键参数 |
 | --- | --- | --- |
-| `xl_plan` | 列出每个源 × 目标会产出哪些文件、走哪条通道、cache 是否已满足 | `paths?` `targets?` `out?` `layout?` `naming?` `flat?` `cwd?` |
-| `xl_context` | 一个源 × 目标的标准化生成上下文：要写的确切路径、结构契约、语言覆盖段、上一版指针 | `file` `target` `out?` `layout?` `naming?` `flat?` `cwd?` |
+| `xl_plan` | 列出每个源 × 目标会产出哪些文件、走哪条通道、cache 是否已满足 | `paths?` `targets?` `out?` `naming?` `flat?` `cwd?` |
+| `xl_context` | 一个源 × 目标的标准化生成上下文：要写的确切路径、结构契约、语言覆盖段、上一版指针 | `file` `target` `out?` `naming?` `flat?` `cwd?` |
 | `xl_cache` | 缓存状态：产物是否已匹配源指纹，以及最近归档的旧版本全文 | `file` `target` `out?` `cwd?` |
 | `xl_verify` | 只校验不写盘：类型集合、成员名、参数个数 | `file` `target` `files` `cwd?` |
 | `xl_emit` | 校验并写盘：产物头、指纹、prompt hash、归档旧版、更新 cache | `file` `target` `files` `model?` `force?` `verify?` `cwd?` |
 | `xl_check` | 静态检查，返回规则码 | `paths?` `targets?` `ignore?` `strict?` `maxWarnings?` `cwd?` |
-| `xl_build` | 跑一次构建：ts 直出写盘，其它目标只给计划 | `paths?` `targets?` `out?` `layout?` `naming?` `flat?` `force?` `dryRun?` `cwd?` |
+| `xl_build` | 跑一次构建：ts 直出写盘，其它目标只给计划 | `paths?` `targets?` `out?` `naming?` `flat?` `force?` `dryRun?` `cwd?` |
+
+布局不是参数，而是目标的属性：`ts` 恒为 `file`（一个源一个产物），其余目标（含自定义目标）恒为 `type`（每个类型各一文件 + 一个模块文件）。没有任何参数能改变它，见 §4.4。
 
 ### 3.1 一次生成的标准流程
 
@@ -138,7 +140,6 @@ xl --version | -v                版本
 | --- | --- |
 | `-t, --target <lang>` | 目标语言，可重复；缺省取 `xl.json` 的 `build.target`，再缺省 `ts` |
 | `-o, --out <dir>` | 输出根目录；缺省取 `xl.json` 的 `build.out`，再缺省 `dist` |
-| `--layout <mode>` | `file` \| `type`（缺省按目标；ts 恒为 `file`） |
 | `--flat` | 丢弃源文件相对目录层级 |
 | `--stdout` | 产物正文写标准输出、不落盘 |
 | `--naming <mode>` | `idiomatic`（缺省）\| `preserve` |
@@ -165,12 +166,14 @@ xl --version | -v                版本
 
 ```text
 dist/
-  ts/pkg/demo.ts                  # layout=file：一个源文件一个产物
-  csharp/pkg/DemoModule.cs        # layout=type：模块级 # method / # const 合并到这里
-  csharp/pkg/Point.cs             # layout=type：每个类型各成一文件
-  python/pkg/demo.py              # layout=file 的其它语言同样带语言目录
+  ts/pkg/demo.ts                  # ts 恒为 file：一个源文件一个产物
+  csharp/pkg/DemoModule.cs        # 其余目标恒为 type：模块级 # method / # const 合并到这里
+  csharp/pkg/Point.cs             # 每个类型各成一文件
+  python/pkg/demo_module.py       # type 布局的其它语言同样带语言目录
+  python/pkg/point.py             # 文件名按 --naming 变换（idiomatic 下 Python 用 snake_case）
 ```
 
+- 布局是目标的属性，不是调用的属性：`ts` 恒为 `file`，csharp / java / python / go / rust 与自定义目标恒为 `type`。命令行与工具都没有 layout 参数（§7 第 15 条），`xl.json` 的 `targets.<lang>.layout` 也不再生效（§9）。
 - 语言目录是计划的产物路径的一部分：`xl_plan` / `xl_context` 报出的路径就是要写的确切路径，`xl_emit` 只接受这些路径。
 - `--flat` 丢弃源文件相对目录，但保留语言目录（`dist/ts/demo.ts`）。
 - 每个语言目录下另有自己的增量 cache：`dist/ts/.xl/`、`dist/csharp/.xl/`（§6）。
@@ -211,13 +214,13 @@ dist/
 {
   "build": { "target": ["ts"], "out": "dist", "naming": "idiomatic", "header": true, "cacheVersions": 5 },
   "check": { "ignore": ["W3102"], "strict": false, "maxWarnings": null },
-  "targets": { "kotlin": { "ext": ".kt", "layout": "type" } }
+  "targets": { "kotlin": { "ext": ".kt" } }
 }
 ```
 
 优先级一律是 **CLI 参数 > 环境变量（`XL_TARGET` / `XL_OUT` / `XL_CONFIG` / `XL_CACHE_DIR`）> `xl.json` > 内置缺省**。
 
-`harness` 段与 `targets.<lang>.model` 不再被读取（没有子进程通道）；`targets.<lang>.model` 现在由 agent 在 `xl_emit` 的 `model` 参数里给出。
+`harness` 段与 `targets.<lang>.model` 不再被读取（没有子进程通道）；`targets.<lang>.model` 现在由 agent 在 `xl_emit` 的 `model` 参数里给出。`targets.<lang>.layout` 同样只是被读过去：自定义目标走 harness 通道，而 harness 通道恒为 `type`（§4.4、§7 第 15 条）。
 
 ---
 
@@ -258,6 +261,7 @@ dist/
 | 11 | `E4001` | 定义为 harness 失败 | 不产生：本插件没有子进程通道。计划通道的失败由 `E4002`（`xl_emit` 校验不通过）表达 |
 | 12 | `E1303` | 「同一父标题下语言名重复」 | 实现；重复的语言段被丢弃，只保留第一个 |
 | 14 | 产物布局与增量缓存位置 | §3.5 的示例把 `layout=file` 的产物直接画在 `--out` 根下（`dist/pkg/demo.ts`），只在 `layout=type` 上加目标语言层；§3.6 把缓存画在 `<cwd>/.xl/` | 一律加语言目录：`<out>/<lang>/…`（ts 也在内），增量 cache 随之落在 `<out>/<lang>/.xl/`（§6）；缺省 `out` 随之从「源文件同级」改为 `dist`。这样每个语言的产物与它的 cache 同处一棵树，多个语言不再共用一棵输出树。`docs/` 是上游规范的逐字副本（`pnpm docs:sync` 校验），所以这条有意的差异只记在这里 |
+| 15 | 布局的可选择性 | §3.1 有 `--layout <mode>`，§3.5 按目标给缺省（ts / python / go / rust / 自定义 = `file`），java 强制 `type` | 布局是目标的固定属性，不是调用的选项：`--layout` 与工具的同名参数一并移除（传 `--layout` 现在是未知选项，退出码 2），`ts` 恒为 `file`，其余目标（含自定义目标）恒为 `type`，`xl.json` 的 `targets.<lang>.layout` 被读过去而不生效。生成依据里的 layout 因此只随目标变化，同一份源不可能两次计划出不同的文件集合 |
 
 ---
 
@@ -310,6 +314,6 @@ scripts/                  extract-fixtures.mjs / verify-docs-sync.mjs / code-map
 
 - **写盘绕过 `ctx.fs` 沙箱。** `xl_emit` 与 ts 直出直接用 `node:fs` 写文件，因此不受 profile 的文件沙箱与审批策略约束。这是为了让插件零依赖、可在任意 profile 装载；如果部署需要沙箱，应把 `src/core/artifact.js` 与 `src/core/build.js` 的写盘改成走 `ctx.fs`。
 - **没有子进程通道。** 这是设计目标，不是缺口：非 ts 目标的生成者是会话里的 agent。
-- **未实现的文档能力。** `xl.json` 的 `build.layout` / `build.verify` / `build.source`、`targets.<lang>.namespace`（只被读入描述符，不参与非 ts 提示）在本实现中不生效；`--concurrency` 不影响结果（ts 打印是同步的）。
+- **未实现的文档能力。** `xl.json` 的 `build.layout` / `build.verify` / `build.source`、`targets.<lang>.namespace`（只被读入描述符，不参与非 ts 提示）、`targets.<lang>.layout`（布局恒为目标的属性）在本实现中不生效；`--concurrency` 不影响结果（ts 打印是同步的）。
 - **`E2003` 依赖 cache。** `--no-cache` 时无法判断产物是否被手改，因此不会报告。
 - **类成员只支持 `### <lang>`。** 见 §7 第 4 条。
