@@ -109,6 +109,8 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 覆盖前把旧产物归档，只保留最近 N 版 | `cache.js` | `tests/artifact.test.js` |
 | 产物与它的增量 cache 同处 `<out>/<目标语言>/`，语言之间不共享目录，且只计划不落盘不留缓存 | `plan.js` 的语言目录、`config.js` `cacheRoot`、`cache.js` `BuildCacheSet` | `tests/plan.test.js`、`tests/build.test.js` |
 | 计划外的路径一律拒绝 | `artifact.js` `emitArtifacts` | `tests/artifact.test.js` |
+| 一个单元产出哪些文件只由目标的 `parts` 与 IR 决定，且至少产出一个 | `plan.js` `planSource` / `plannedParts` / `unitNeedsBodies` | `tests/plan.test.js` |
+| 定义部件（C++ `.cpp`）只校验它提到的成员，声明部件必须提到全部成员 | `verify.js` `verifyStructure` 的 `scope` | `tests/artifact.test.js` |
 | `# statement` 段逐字节进入 ts 产物，且不参与导出与结构校验 | `emit-ts.js` `renderStatement`、`parse.js` `exportedNamesOf`、`verify.js` `verifyStructure` | `tests/conformance.test.js`、`tests/emit-ts.test.js` |
 | 码表里每个码都有产生它的地方 | `scripts/code-map.mjs` | `pnpm run codes` |
 
@@ -161,6 +163,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 想做的事 | 改哪里 |
 | --- | --- |
 | 加一个目标语言 | `src/core/targets.js` 的 `BUILTIN_TARGETS`；或在 `xl.json` 的 `targets.<lang>` 里声明 `ext`。自定义目标走 harness 通道，因此布局恒为 `type`，不需要（也不能）声明 layout |
+| 加一个多文件语言（如 C++ 的头/源） | `src/core/targets.js` 的 `BUILTIN_TARGETS.<lang>.parts`，或在 `targets.<lang>.parts` 里声明部件表：`requires: "bodies"` 让定义部件只在单元有可执行内容时出现，`scope: "definition"` 让结构回读只校验该部件提到的成员。计划、cache、产物头、工具渲染都按 `parts` 自动展开，不需要改其它模块 |
 | 改 ts 打印规则 | `src/core/emit-ts.js`，同时更新 `tests/emit-ts.test.js` 与基准样例的一致性测试 |
 | 加一条诊断码 | `src/core/diagnostics.js` 的 `DIAG_CODES`，在产生它的那一层 emit，补 `tests/parse.test.js` 或 `tests/check.test.js`，再跑 `pnpm run codes` |
 | 让生成者拿到更多上下文 | `src/core/build.js` 的 `languageContext` 与 `src/core/artifact.js` 的 `contextFor`（注意 `promptHash` 的输入要同步，否则 cache 失效判定会失真） |

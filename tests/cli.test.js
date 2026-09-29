@@ -236,6 +236,7 @@ test('xl targets lists the built-in targets', async () => {
     assert.equal(result.code, 0)
     assert.ok(result.stdout.includes('ts\tdirect\t.ts\tfile'))
     assert.ok(result.stdout.includes('csharp\tplan\t.cs\ttype'))
+    assert.ok(result.stdout.includes('cpp\tplan\t.h,.cpp\ttype'))
   } finally {
     dropWorkspace(cwd)
   }

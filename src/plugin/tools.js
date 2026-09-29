@@ -138,8 +138,9 @@ function contextTool(service) {
     name: 'xl_context',
     description: [
       'Return the standardized generation context for one *.xl.md and one target language: the exact output paths',
-      'to write, the structural contract the product must match, the target-language sections resolved out of the',
-      'source and its dependencies, and a pointer to the cached previous version.',
+      'to write (one per part — C++ has a header and a source part), the structural contract the product must match,',
+      'the target-language sections resolved out of the source and its dependencies, and a pointer to each cached',
+      'previous version.',
       'Read the *.xl.md sources and requirement documents yourself; this tool supplies what reading them cannot: the',
       'binding contract and the layout.',
     ].join(' '),
@@ -166,9 +167,9 @@ function contextTool(service) {
         summary: opened.context.summary,
         language: opened.context.language,
         outputs: opened.context.outputs,
-        previous: opened.context.previous === null
-          ? null
-          : { version: opened.context.previous.version, path: opened.context.previous.path },
+        previous: opened.context.previous.map(item => ({
+          part: item.part, ext: item.ext, version: item.version, path: item.path,
+        })),
         promptHash: opened.context.promptHash,
       }
     },
@@ -185,7 +186,7 @@ function cacheTool(service) {
     name: 'xl_cache',
     description: [
       'Return the cached state for one *.xl.md and target: whether the products on disk already match the source',
-      'fingerprint, and the most recent archived version to extend rather than rewrite.',
+      'fingerprint, and the most recent archived version of each part to extend rather than rewrite.',
       'This is the incremental channel. Check it before generating; pass the previous version to the generator when',
       'one exists so an update stays a edit instead of a rewrite.',
     ].join(' '),
@@ -210,9 +211,9 @@ function cacheTool(service) {
         fingerprint: record.fingerprint,
         promptHash: record.promptHash,
         outputs: record.outputs,
-        previous: record.previous === null
-          ? null
-          : { version: record.previous.version, path: record.previous.path },
+        previous: record.previous.map(item => ({
+          part: item.part, ext: item.ext, version: item.version, path: item.path,
+        })),
       }
     },
   }
@@ -411,10 +412,16 @@ export function renderPlan(result) {
   if (result.plans.length === 0) lines.push('(no plan; run xl_check for diagnostics)')
   for (const plan of result.plans) {
     lines.push(`## ${plan.src} → ${plan.target} (${plan.channel === 'direct' ? 'direct, produced by xl_build' : 'plan, produced by you'})`)
-    lines.push(`layout: ${plan.layout}${plan.previous === undefined ? '' : ` · previous version: ${plan.previous.path}`}`)
+    const parts = [...new Set(plan.outputs.map(output => output.part))]
+    const multiPart = parts.length > 1
+    lines.push(`layout: ${plan.layout}${multiPart ? ` · parts: ${parts.join(', ')}` : ''}`)
+    if (Array.isArray(plan.previous) && plan.previous.length > 0) {
+      lines.push(`previous version: ${plan.previous.map(item => `${item.path} [${item.part}]`).join(', ')}`)
+    }
     lines.push(`reusable: ${plan.reuse.reusable ? 'yes' : `no (${plan.reuse.reason})`}`)
     for (const output of plan.outputs) {
-      lines.push(`- ${output.path} — ${output.kind === 'module' ? `module-level: ${output.names.join(', ')}` : output.names.join(', ')}`)
+      const label = multiPart ? `[${output.part}] ` : ''
+      lines.push(`- ${label}${output.path} — ${output.kind === 'module' ? `module-level: ${output.names.join(', ')}` : output.names.join(', ')}`)
     }
     lines.push('')
   }
@@ -432,15 +439,19 @@ export function renderPlan(result) {
 export function renderContext(opened) {
   const { context } = opened
   const lines = []
+  const parts = [...new Set(context.outputs.map(output => output.part))]
+  const multiPart = parts.length > 1
   lines.push(`# xl context — ${context.source} → ${context.target}`)
   lines.push('')
   lines.push(`layout: ${context.layout} · naming: ${opened.resolved.options.naming} · channel: plan (you generate the code)`)
+  if (multiPart) lines.push(`parts: ${parts.join(', ')} — this target splits each declaration across these files`)
   lines.push(`source fingerprint: ${opened.plan?.fingerprint ?? '(unavailable)'}`)
   lines.push(`context hash: ${context.promptHash}`)
   lines.push('')
   lines.push('## Write exactly these files')
   for (const output of context.outputs) {
-    lines.push(`- \`${output.path}\` — ${output.kind === 'module' ? `module-level declarations: ${output.names.join(', ')}` : output.names.join(', ')}`)
+    const label = multiPart ? `[${output.part}] ` : ''
+    lines.push(`- ${label}\`${output.path}\` — ${output.kind === 'module' ? `module-level declarations: ${output.names.join(', ')}` : output.names.join(', ')}`)
   }
   lines.push('')
   lines.push('## Structural contract (the product must match it)')
@@ -478,10 +489,13 @@ export function renderContext(opened) {
   }
   lines.push('')
   lines.push('## Cached previous version')
-  if (context.previous === null) {
+  if (context.previous.length === 0) {
     lines.push('none — this is the first generation for this source and target.')
   } else {
-    lines.push(`\`${context.previous.path}\` (version ${context.previous.version}). Call xl_cache to read it, then extend it instead of rewriting.`)
+    for (const item of context.previous) {
+      lines.push(`- \`${item.path}\` [${item.part}] (version ${item.version})`)
+    }
+    lines.push('Call xl_cache to read them, then extend them instead of rewriting.')
   }
   lines.push('')
   lines.push('## Next')
@@ -503,16 +517,18 @@ export function renderCache(record) {
   lines.push(`context hash: ${record.promptHash}`)
   lines.push('')
   lines.push('## Planned outputs')
-  for (const output of record.outputs) lines.push(`- \`${output.path}\``)
+  for (const output of record.outputs) lines.push(`- [${output.part}] \`${output.path}\``)
   lines.push('')
-  if (record.previous === null) {
+  if (record.previous.length === 0) {
     lines.push('## Previous version')
     lines.push('none — nothing has been archived for this source and target yet.')
   } else {
-    lines.push(`## Previous version (${record.previous.path}, version ${record.previous.version})`)
-    lines.push('```')
-    lines.push(record.previous.text.replace(/\n$/, ''))
-    lines.push('```')
+    for (const item of record.previous) {
+      lines.push(`## Previous version (${item.path}, version ${item.version}, part ${item.part})`)
+      lines.push('```')
+      lines.push(item.text.replace(/\n$/, ''))
+      lines.push('```')
+    }
   }
   return lines.join('\n')
 }

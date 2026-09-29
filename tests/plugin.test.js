@@ -35,6 +35,40 @@ const DEMO = [
   '',
 ].join('\n')
 
+const CPP_DEMO = [
+  '# class point',
+  '',
+  '## field x:int = 0',
+  'x.',
+  '',
+  '## method move:(dx:int)=>void',
+  'move.',
+  '```ts',
+  'this.x = dx;',
+  '```',
+  '',
+].join('\n')
+
+const CPP_HEADER = [
+  '#pragma once',
+  '',
+  'class point {',
+  'public:',
+  '  int x = 0;',
+  '  void move(int dx);',
+  '};',
+  '',
+].join('\n')
+
+const CPP_SOURCE = [
+  '#include "point.h"',
+  '',
+  'void point::move(int dx) {',
+  '  x += dx;',
+  '}',
+  '',
+].join('\n')
+
 /**
  * Mount the plugin on a fake context rooted at a workspace.
  * @param {string} cwd - workspace root.
@@ -46,7 +80,6 @@ function mount(cwd, config = {}) {
   apply(fake.ctx, { workspaceRoot: cwd, ...config })
   return fake
 }
-
 test('apply publishes the xl service and registers every tool', () => {
   const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
   try {
@@ -133,6 +166,42 @@ test('xl_cache reports no previous version before the first emit', async () => {
     const fake = mount(cwd)
     const { text } = await callTool(fake.tools, 'xl_cache', { file: 'demo.xl.md', target: 'csharp', cwd })
     assert.ok(text.includes('none — nothing has been archived'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_context and xl_emit handle a two-part C++ target', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': CPP_DEMO })
+  try {
+    const fake = mount(cwd)
+    const opened = await callTool(fake.tools, 'xl_context', { file: 'demo.xl.md', target: 'cpp', cwd })
+    assert.ok(opened.text.includes('parts: header, source'))
+    assert.ok(opened.text.includes('[header] `dist/cpp/point.h`'))
+    assert.ok(opened.text.includes('[source] `dist/cpp/point.cpp`'))
+    assert.deepEqual(opened.value.previous, [])
+
+    const files = [
+      { path: 'dist/cpp/point.h', content: CPP_HEADER },
+      { path: 'dist/cpp/point.cpp', content: CPP_SOURCE },
+    ]
+    const verified = await callTool(fake.tools, 'xl_verify', { file: 'demo.xl.md', target: 'cpp', files, cwd })
+    assert.ok(verified.text.includes('xl verify: ok'))
+    const emitted = await callTool(fake.tools, 'xl_emit', { file: 'demo.xl.md', target: 'cpp', files, cwd })
+    assert.equal(emitted.value.ok, true)
+    assert.deepEqual(emitted.value.written, ['dist/cpp/point.h', 'dist/cpp/point.cpp'])
+    assert.ok(existsSync(join(cwd, 'dist/cpp/point.cpp')))
+
+    // A second emit archives each part, and xl_cache offers both back.
+    const again = await callTool(fake.tools, 'xl_emit', { file: 'demo.xl.md', target: 'cpp', files, cwd })
+    assert.equal(again.value.ok, true)
+    const cached = await callTool(fake.tools, 'xl_cache', { file: 'demo.xl.md', target: 'cpp', cwd })
+    assert.ok(cached.text.includes('part header'))
+    assert.ok(cached.text.includes('part source'))
+    assert.deepEqual(cached.value.previous.map(item => [item.part, item.ext, item.version]), [
+      ['header', '.h', 1],
+      ['source', '.cpp', 1],
+    ])
   } finally {
     dropWorkspace(cwd)
   }

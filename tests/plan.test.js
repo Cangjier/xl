@@ -108,6 +108,134 @@ test('layout is a fixed property of the target, not of an invocation', () => {
   assert.equal(resolveTarget('python', {}).layout, 'type')
   assert.equal(resolveTarget('go', {}).layout, 'type')
   assert.equal(resolveTarget('rust', {}).layout, 'type')
+  assert.equal(resolveTarget('cpp', {}).layout, 'type')
+})
+
+test('every single-part target declares exactly one part', () => {
+  for (const lang of ['ts', 'csharp', 'java', 'python', 'go', 'rust']) {
+    const target = resolveTarget(lang, {})
+    assert.deepEqual(target.parts.map(part => part.role), ['file'], lang)
+    assert.equal(target.ext, target.parts[0].ext, lang)
+    assert.equal(target.parts[0].requires, undefined, lang)
+  }
+})
+
+test('cpp declares a header part and a conditional source part', () => {
+  const target = resolveTarget('cpp', {})
+  assert.deepEqual(target.parts, [
+    { role: 'header', ext: '.h', scope: 'declaration' },
+    { role: 'source', ext: '.cpp', requires: 'bodies', scope: 'definition' },
+  ])
+  // The primary extension is the header: `ext` stays the first part's extension.
+  assert.equal(target.ext, '.h')
+  assert.equal(resolveTarget('C++', {}).name, 'cpp')
+  assert.equal(resolveTarget('cxx', {}).name, 'cpp')
+  // cpp file names follow the snake_case convention, so an all-lowercase
+  // declared name keeps its spelling.
+  assert.equal(typeFileBaseName('point', 'cpp', 'idiomatic'), 'point')
+  assert.equal(typeFileBaseName('HTTPClient', 'cpp', 'idiomatic'), 'http_client')
+  assert.equal(typeFileBaseName('HTTPClient', 'cpp', 'preserve'), 'HTTPClient')
+})
+
+test('cpp plans a header for every unit and a source only for a unit with a body', () => {
+  const plan = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('cpp', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.equal(plan.layout, 'type')
+  assert.deepEqual(plan.outputs.map(output => [output.path, output.part, output.scope]), [
+    ['dist/cpp/pkg/demo_module.h', 'header', 'declaration'],
+    ['dist/cpp/pkg/demo_module.cpp', 'source', 'definition'],
+    ['dist/cpp/pkg/color.h', 'header', 'declaration'],
+    ['dist/cpp/pkg/printable.h', 'header', 'declaration'],
+    ['dist/cpp/pkg/point.h', 'header', 'declaration'],
+  ])
+})
+
+test('a header-only class plans one file, a class with a body plans two', () => {
+  const headerOnly = ['# class point', '', '## field x:int = 0', ''].join('\n')
+  const withBody = ['# class point', '', '## field x:int = 0', '', '## method move:(dx:int)=>void', '```ts', 'this.x = dx;', '```', ''].join('\n')
+  const planOf = (text) => planSource(parseXlMd(text, 'a.xl.md').doc, 'a.xl.md', resolveTarget('cpp', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(planOf(headerOnly).outputs.map(output => output.path), ['dist/cpp/point.h'])
+  assert.deepEqual(planOf(withBody).outputs.map(output => output.path), ['dist/cpp/point.h', 'dist/cpp/point.cpp'])
+})
+
+test('a member whose only body is a target-language section still needs a source part', () => {
+  const text = [
+    '# class point',
+    '',
+    '## method move:(dx:int)=>void',
+    '### cpp',
+    '```cpp',
+    'void point::move(int dx) { x += dx; }',
+    '```',
+    '',
+  ].join('\n')
+  const plan = planSource(parseXlMd(text, 'a.xl.md').doc, 'a.xl.md', resolveTarget('cpp', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(plan.outputs.map(output => output.path), ['dist/cpp/point.h', 'dist/cpp/point.cpp'])
+})
+
+test('a statement always needs a source part', () => {
+  const text = ['# statement', '```ts', 'run();', '```', '', '## cpp', '```cpp', 'run();', '```', ''].join('\n')
+  const plan = planSource(parseXlMd(text, 'a.xl.md').doc, 'a.xl.md', resolveTarget('cpp', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(plan.outputs.map(output => output.path), ['dist/cpp/a_module.h', 'dist/cpp/a_module.cpp'])
+})
+
+test('a module file gets a source part only when a module declaration carries code', () => {
+  const planOf = (text) => planSource(parseXlMd(text, 'pkg/demo.xl.md').doc, 'pkg/demo.xl.md', resolveTarget('cpp', {}), { out: 'dist', naming: 'idiomatic' })
+  const aliasOnly = ['# type MemberKind = "field" | "method"', 'kinds.', ''].join('\n')
+  const inlineConst = ['# const MAX_DEPTH:int = 8', 'cap.', ''].join('\n')
+  const blockConst = ['# const RULES:Array<string>', '```ts', '["E1001"]', '```', ''].join('\n')
+  const method = ['# method load:()=>void', '```ts', 'return;', '```', ''].join('\n')
+  assert.deepEqual(planOf(aliasOnly).outputs.map(output => output.path), ['dist/cpp/pkg/demo_module.h'])
+  assert.deepEqual(planOf(inlineConst).outputs.map(output => output.path), ['dist/cpp/pkg/demo_module.h'])
+  assert.deepEqual(planOf(blockConst).outputs.map(output => output.path), ['dist/cpp/pkg/demo_module.h', 'dist/cpp/pkg/demo_module.cpp'])
+  assert.deepEqual(planOf(method).outputs.map(output => output.path), ['dist/cpp/pkg/demo_module.h', 'dist/cpp/pkg/demo_module.cpp'])
+})
+
+test('a declared target may bring its own parts', () => {
+  const declared = resolveTarget('kotlin', {
+    targets: {
+      kotlin: {
+        parts: [
+          { role: 'header', ext: 'kt' },
+          { role: 'source', ext: 'kts', requires: 'bodies', scope: 'definition' },
+        ],
+      },
+    },
+  })
+  assert.deepEqual(declared.parts, [
+    { role: 'header', ext: '.kt' },
+    { role: 'source', ext: '.kts', requires: 'bodies', scope: 'definition' },
+  ])
+  assert.equal(declared.ext, '.kt')
+  assert.equal(declared.layout, 'type')
+  const plan = planSource(doc(), 'pkg/demo.xl.md', declared, { out: 'dist', naming: 'idiomatic' })
+  assert.ok(plan.outputs.some(output => output.path === 'dist/kotlin/pkg/DemoModule.kt'))
+  assert.ok(plan.outputs.some(output => output.path === 'dist/kotlin/pkg/DemoModule.kts'))
+  assert.ok(plan.outputs.every(output => output.scope === undefined || output.scope === 'declaration' || output.scope === 'definition'))
+})
+
+test('an unusable parts declaration is a usage error E0004', () => {
+  const cases = [
+    { parts: [] },
+    { parts: 'kt' },
+    { parts: [{ role: 'header' }] },
+    { parts: [{ ext: '.kt', requires: 'bodies-nope' }] },
+    { parts: [{ ext: '.kt', scope: 'nope' }] },
+    { parts: [{ role: 'same', ext: '.kt' }, { role: 'same', ext: '.kts' }] },
+  ]
+  for (const declared of cases) {
+    assert.throws(
+      () => resolveTarget('kotlin', { targets: { kotlin: declared } }),
+      error => error instanceof UsageError && error.code === 'E0004',
+      JSON.stringify(declared),
+    )
+  }
+})
+
+test('a unit whose every part is conditional still plans one file', () => {
+  const declared = resolveTarget('zig', { targets: { zig: { parts: [{ role: 'source', ext: '.zig', requires: 'bodies' }] } } })
+  const plan = planSource(doc(), 'a.xl.md', declared, { out: 'dist', naming: 'idiomatic' })
+  assert.ok(plan.outputs.length > 0)
+  assert.ok(plan.outputs.every(output => output.ext === '.zig'))
 })
 
 test('an unknown target is a usage error E0003', () => {

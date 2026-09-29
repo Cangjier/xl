@@ -219,14 +219,21 @@ function readLines(path) {
  */
 function runTargetsCommand(service, request, writer, io) {
   const targets = service.targets(request)
+  const extensionsOf = target => target.parts.map(part => part.ext).join(',')
   if (writer.ndjson) {
     for (const target of targets) {
-      writer.event('target', { name: target.name, channel: target.channel, ext: target.ext, layout: target.layout })
+      writer.event('target', {
+        name: target.name,
+        channel: target.channel,
+        ext: extensionsOf(target),
+        layout: target.layout,
+        parts: target.parts,
+      })
     }
     return 0
   }
   for (const target of targets) {
-    io.out.write(`${target.name}\t${target.channel === 'direct' ? 'direct' : 'plan'}\t${target.ext}\t${target.layout}\n`)
+    io.out.write(`${target.name}\t${target.channel === 'direct' ? 'direct' : 'plan'}\t${extensionsOf(target)}\t${target.layout}\n`)
   }
   return 0
 }

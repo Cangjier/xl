@@ -31,6 +31,7 @@ import {
   isArtifact,
   renderHeader,
 } from './header.js'
+import { commentMarkerFor } from './parse.js'
 import { resolveTarget } from './targets.js'
 import { structureSummary, verifyStructure } from './verify.js'
 
@@ -99,13 +100,33 @@ export function contextFor({ cwd, source, target, options = {}, config = {}, env
   const cache = openCache({ cwd, config, env, options: resolved.options })
   const plans = planWorkspace(prepared, { targets: [resolved.target], options: resolved.options, cache, cwd })
   const plan = plans[0]
-  const previous = resolved.options.noCache ? null : cache.for(resolved.target).latestArchive(source, resolved.target.ext)
+  const outputs = plan?.outputs ?? []
+  // The archive family is keyed by source × extension, so a multi-part target
+  // (C++ `.h` + `.cpp`) offers one previous version per part, not one per path.
+  const archived = resolved.options.noCache ? [] : cache.for(resolved.target).latestArchives(source, outputs.map(output => output.ext))
+  const byExtension = new Map(archived.map(item => [item.ext, item]))
+  const previous = []
+  const seenExtensions = new Set()
+  for (const output of outputs) {
+    if (seenExtensions.has(output.ext)) continue
+    seenExtensions.add(output.ext)
+    const item = byExtension.get(output.ext)
+    if (item === undefined) continue
+    previous.push({
+      part: output.part,
+      ext: output.ext,
+      version: item.version,
+      path: item.path,
+      text: item.text,
+    })
+  }
   const context = {
     source,
     target: resolved.target.name,
     channel: resolved.target.channel,
     layout: plan?.layout ?? resolved.target.layout,
-    outputs: plan?.outputs ?? [],
+    parts: resolved.target.parts,
+    outputs,
     text: entry.text,
     summary: structureSummary(entry.doc),
     language: languageContext(entry.doc, resolved.target, prepared, source),
@@ -114,15 +135,14 @@ export function contextFor({ cwd, source, target, options = {}, config = {}, env
       text: document.text,
       summary: structureSummary(document.doc),
     })),
-    previous: previous === null
-      ? null
-      : { version: previous.version, path: previous.path, text: previous.text },
+    previous,
   }
   context.promptHash = fingerprintPrompt(JSON.stringify({
     summary: context.summary,
     language: context.language,
     dependencies: context.dependencies.map(item => item.summary),
     layout: context.layout,
+    parts: context.parts.map(part => [part.role, part.ext, part.requires ?? null, part.scope ?? null]),
     naming: resolved.options.naming,
   }))
   const diagnostics = checkWorkspace(prepared, {
@@ -175,7 +195,10 @@ export function verifyArtifacts({ cwd, source, target, files, options = {}, conf
       issues.push({ path: output.path, issues: ['no content was supplied for this planned output'] })
       continue
     }
-    const verdict = verifyStructure(opened.entry.doc, content, { only: new Set(output.names) })
+    const verdict = verifyStructure(opened.entry.doc, content, {
+      only: new Set(output.names),
+      scope: output.scope,
+    })
     if (!verdict.ok) issues.push({ path: output.path, issues: verdict.issues })
   }
   return {
@@ -251,7 +274,10 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
       continue
     }
     if (resolved.options.verify) {
-      const verdict = verifyStructure(entry.doc, content, { only: new Set(output.names) })
+      const verdict = verifyStructure(entry.doc, content, {
+        only: new Set(output.names),
+        scope: output.scope,
+      })
       if (!verdict.ok) {
         diagnostics.push(...verdict.issues.map(issue => diag({
           code: 'E4002',
@@ -281,7 +307,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
         fingerprint,
         target: resolved.target.name,
         version: XL_VERSION,
-        comment: resolved.target.comment,
+        comment: commentMarkerFor(resolved.target.name, output.ext),
         model,
         promptHash: context.promptHash,
       })}\n\n`

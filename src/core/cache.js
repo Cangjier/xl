@@ -6,9 +6,11 @@
  * * `<cache root>/cache.json` records each source × target's fingerprint, the
  *   artifact paths it produced, and the artifact's own content hash, so a later
  *   run can detect a hand-edited product (`E2003`).
- * * `<cache root>/cache/<mirror>.<ext>.<N>` keeps recent products. The newest
- *   version is what the non-ts channel offers as "the implementation to build
- *   on", so a different version is a different generation input.
+ * * `<cache root>/cache/<mirror>.<ext>.<N>` keeps recent products. One family
+ *   holds one source and one extension, so C++ keeps a `.h` history and a
+ *   `.cpp` history side by side. The newest version of a family is what the
+ *   non-ts channel offers as "the implementation to build on", so a different
+ *   version is a different generation input.
  *
  * There is one cache root per target language (`dist/ts/.xl`, `dist/csharp/.xl`,
  * …), so a whole-workspace build opens a {@link BuildCacheSet}; an operation
@@ -154,47 +156,92 @@ export class BuildCache {
    */
   archiveText(sourceRel, outPath, content) {
     if (this.versions <= 0) return null
-    const mirror = toPosix(sourceRel).replace(/\.xl\.md$/, '')
-    const slash = mirror.lastIndexOf('/')
-    const directory = slash < 0 ? '' : mirror.slice(0, slash)
-    const base = slash < 0 ? mirror : mirror.slice(slash + 1)
+    const { targetDir, base } = this.archiveBase(sourceRel)
     const extension = extensionOf(outPath)
-    const targetDir = join(this.archiveRoot, directory)
     try {
       mkdirSync(targetDir, { recursive: true })
       const index = this.nextArchiveIndex(targetDir, base, extension)
       const file = join(targetDir, `${base}${extension}.${index}`)
       writeFileSync(file, content, 'utf8')
       this.prune(targetDir, base, extension)
-      return toPosix(file.startsWith(`${this.cwd}/`) || file.startsWith(`${this.cwd}\\`)
-        ? file.slice(this.cwd.length + 1)
-        : file)
+      return this.relativize(file)
     } catch {
       return null
     }
   }
 
   /**
-   * The newest archived product for a source, if any.
+   * The newest archived product for a source and one extension, if any.
    * @param {string} sourceRel - POSIX source path.
    * @param {string} extension - target extension, including the dot.
-   * @returns {{version: number, path: string, text: string} | null} the newest version.
+   * @param {boolean} [withText] - whether to read the archived content; defaults to true.
+   * @returns {{version: number, path: string, text: string | null} | null} the newest version.
    */
-  latestArchive(sourceRel, extension) {
-    const mirror = toPosix(sourceRel).replace(/\.xl\.md$/, '')
-    const slash = mirror.lastIndexOf('/')
-    const directory = slash < 0 ? '' : mirror.slice(0, slash)
-    const base = slash < 0 ? mirror : mirror.slice(slash + 1)
-    const targetDir = join(this.archiveRoot, directory)
+  latestArchive(sourceRel, extension, withText = true) {
+    const { targetDir, base } = this.archiveBase(sourceRel)
     const indices = this.archiveIndices(targetDir, base, extension)
     if (indices.length === 0) return null
     const version = indices[indices.length - 1]
     const file = join(targetDir, `${base}${extension}.${version}`)
+    if (!withText) return { version, path: this.relativize(file), text: null }
     try {
-      return { version, path: toPosix(file), text: readFileSync(file, 'utf8') }
+      return { version, path: this.relativize(file), text: readFileSync(file, 'utf8') }
     } catch {
       return null
     }
+  }
+
+  /**
+   * A produced path as the caller names paths: POSIX, relative to the working
+   * directory when it lives under it, absolute otherwise (an absolute
+   * `XL_CACHE_DIR` can point anywhere).
+   * @param {string} path - a native path.
+   * @returns {string} the POSIX display path.
+   */
+  relativize(path) {
+    const posix = toPosix(path)
+    const prefix = toPosix(this.cwd)
+    return posix.startsWith(`${prefix}/`) ? posix.slice(prefix.length + 1) : posix
+  }
+
+  /**
+   * The newest archived product for a source, one entry per extension.
+   *
+   * The archive family is keyed by source and extension, not by output path, so
+   * a multi-part target (C++ `.h` + `.cpp`) and a `type` layout that spreads one
+   * source over several files of one extension both resolve to one entry per
+   * extension here. That is the granularity xl has always archived at; a
+   * generator gets "the previous product of this extension" rather than one
+   * pointer per planned path.
+   * @param {string} sourceRel - POSIX source path.
+   * @param {readonly string[]} extensions - the extensions the plan produces, in plan order.
+   * @param {object} [options] - read options.
+   * @param {boolean} [options.text] - whether to read the archived content; defaults to true.
+   * @returns {object[]} the entries that exist, each with `ext`, `version`, `path`, and `text`.
+   */
+  latestArchives(sourceRel, extensions, { text = true } = {}) {
+    const out = []
+    const seen = new Set()
+    for (const extension of extensions) {
+      if (seen.has(extension)) continue
+      seen.add(extension)
+      const latest = this.latestArchive(sourceRel, extension, text)
+      if (latest !== null) out.push({ ext: extension, ...latest })
+    }
+    return out
+  }
+
+  /**
+   * The archive directory and base name one source maps to.
+   * @param {string} sourceRel - POSIX source path.
+   * @returns {{targetDir: string, base: string}} the family location.
+   */
+  archiveBase(sourceRel) {
+    const mirror = toPosix(sourceRel).replace(/\.xl\.md$/, '')
+    const slash = mirror.lastIndexOf('/')
+    const directory = slash < 0 ? '' : mirror.slice(0, slash)
+    const base = slash < 0 ? mirror : mirror.slice(slash + 1)
+    return { targetDir: join(this.archiveRoot, directory), base }
   }
 
   /**

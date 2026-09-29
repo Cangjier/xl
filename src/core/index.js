@@ -69,7 +69,7 @@ export {
   parseArtifactHeader,
   renderHeader,
 } from './header.js'
-export { detectConflicts, outputRoot, planSource, sourceBaseName } from './plan.js'
+export { detectConflicts, outputRoot, plannedParts, planSource, sourceBaseName, unitNeedsBodies } from './plan.js'
 export {
   collectSources,
   expandBraces,
@@ -89,6 +89,13 @@ export {
   LAYOUT_TYPE,
   listTargets,
   MODULE_FILE_SUFFIX,
+  normalizeParts,
+  PART_REQUIRES_BODIES,
+  PART_ROLE_FILE,
+  PART_ROLE_HEADER,
+  PART_ROLE_SOURCE,
+  PART_SCOPE_DECLARATION,
+  PART_SCOPE_DEFINITION,
   resolveTarget,
   resolveTargets,
   SOURCE_LANG,

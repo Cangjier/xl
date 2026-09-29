@@ -255,6 +255,33 @@ test('the plan reports cache reuse and the previous version pointer', () => {
   }
 })
 
+test('xl.json can declare a multi-part target', () => {
+  const config = JSON.stringify({
+    targets: {
+      objcpp: {
+        parts: [
+          { role: 'header', ext: '.h' },
+          { role: 'source', ext: '.mm', requires: 'bodies', scope: 'definition' },
+        ],
+      },
+    },
+  })
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO, 'xl.json': config })
+  try {
+    const plan = runPlan({ cwd, paths: ['demo.xl.md'], cli: { targets: ['objcpp'] }, env: {} })
+    assert.equal(plan.exitCode, 0)
+    assert.deepEqual(plan.plans[0].outputs.map(output => [output.path, output.part, output.scope]), [
+      // `# method greet` has a body, so the module unit plans both parts.
+      ['dist/objcpp/demoModule.h', 'header', 'declaration'],
+      ['dist/objcpp/demoModule.mm', 'source', 'definition'],
+      // `# class point` has only an inline field, so it stays header-only.
+      ['dist/objcpp/point.h', 'header', 'declaration'],
+    ])
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
 test('xl.json supplies the default target and output root', () => {
   const config = JSON.stringify({ build: { target: ['csharp'], out: 'gen' } })
   const cwd = makeWorkspace({ 'demo.xl.md': DEMO, 'xl.json': config })

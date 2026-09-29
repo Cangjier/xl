@@ -214,8 +214,20 @@ export function planWorkspace(prepared, { targets, options, cache, cwd }) {
       plan.context = languageContext(entry.doc, target, prepared, entry.src)
       plan.fingerprint = fingerprintSource(entry.text)
       plan.reuse = reuseDecision({ cwd: cwd ?? prepared.cwd, plan, target, fingerprint: plan.fingerprint, force: options.force === true })
-      const previous = cache?.for(target).latestArchive(entry.src, target.ext) ?? null
-      if (previous !== null) plan.previous = { version: previous.version, path: previous.path }
+      // One previous version per extension: a multi-part target (C++ `.h` and
+      // `.cpp`) keeps its two histories side by side, and a single-part target
+      // reports exactly the pointer it always did. No text is read here — the
+      // plan only needs to name the file the generator should extend.
+      const extensions = [...new Set(plan.outputs.map(output => output.ext))]
+      const previous = cache === undefined ? [] : cache.for(target).latestArchives(entry.src, extensions, { text: false })
+      if (previous.length > 0) {
+        plan.previous = previous.map(item => ({
+          part: plan.outputs.find(output => output.ext === item.ext)?.part ?? null,
+          ext: item.ext,
+          version: item.version,
+          path: item.path,
+        }))
+      }
       plans.push(plan)
     }
   }
@@ -495,6 +507,9 @@ function processPlan({ cwd, plan, target, entry, options, cache, result }) {
     renderHeader: fields => renderHeader({ ...fields, version: XL_VERSION, comment: target.comment }),
   })
   const output = plan.outputs[0]
+  // `plan.outputs[0]` is the whole artifact here: the direct channel is
+  // single-part by construction, since only `ts` uses it and `ts` declares
+  // exactly one part.
   if (options.stdout === true) {
     result.stdout.push(artifact)
     return {

@@ -273,10 +273,20 @@ function countTopLevelCommas(body) {
  *
  * Checks the three documented facts: the type set, the member-name set, and
  * parameter counts. Anything else is the target compiler's business.
+ *
+ * `scope` says what kind of product is being checked. A **declaration** part
+ * (the default, and every single-part language) must mention every member,
+ * because that is the only place the member exists. A **definition** part (the
+ * C++ source file) must mention the type it implements, but only the members it
+ * actually defines: demanding every member would reject a correct `.cpp`, since
+ * the header is where the others are declared. A member that does appear still
+ * has its parameter count checked, so a definition that disagrees with the IR
+ * is still caught.
  * @param {object} doc - parsed document.
  * @param {string} generated - the generated product text.
  * @param {object} [options] - verification scope.
  * @param {ReadonlySet<string>} [options.only] - restrict the check to these declaration names; used when a `type` layout splits one source across several files.
+ * @param {'declaration' | 'definition'} [options.scope] - the kind of product being checked; defaults to `declaration`.
  * @returns {{ok: boolean, issues: string[], missingTypes: string[], missingMembers: string[], parameterMismatches: object[]}} the verdict.
  */
 export function verifyStructure(doc, generated, options = {}) {
@@ -286,6 +296,7 @@ export function verifyStructure(doc, generated, options = {}) {
   const parameterMismatches = []
   const declared = declaredTypeNames(generated)
   const inScope = decl => options.only === undefined || options.only.has(decl.name)
+  const mustDeclare = options.scope !== 'definition'
 
   for (const decl of doc.decls) {
     if (decl.kind !== 'enum' && decl.kind !== 'interface' && decl.kind !== 'class') continue
@@ -300,6 +311,7 @@ export function verifyStructure(doc, generated, options = {}) {
     for (const member of decl.members) {
       if (member.name === '' || member.kind === 'constructor') continue
       if (!new RegExp(`\\b${escapeRegExp(member.name)}\\b`).test(generated)) {
+        if (!mustDeclare) continue
         missingMembers.push(`${decl.name}.${member.name}`)
         issues.push(`member "${member.name}" of "${decl.name}" is absent from the generated code`)
         continue
@@ -323,6 +335,7 @@ export function verifyStructure(doc, generated, options = {}) {
     if (decl.name === '') continue
     if (!inScope(decl)) continue
     if (!new RegExp(`\\b${escapeRegExp(decl.name)}\\b`).test(generated)) {
+      if (!mustDeclare) continue
       missingMembers.push(decl.name)
       issues.push(`module-level ${decl.kind} "${decl.name}" is absent from the generated code`)
       continue
