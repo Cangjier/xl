@@ -40,6 +40,8 @@ export function checkDocument(input) {
   const localTypes = new Map()
   const localAny = new Map()
   for (const decl of doc.decls) {
+    // A `# statement` declares no symbol, so it enters neither name map.
+    if (decl.kind === 'statement') continue
     localAny.set(decl.name, decl.kind)
     if (TYPE_SECTION_KINDS.has(decl.kind)) localTypes.set(decl.name, decl)
     if (decl.kind === 'enum') {
@@ -170,6 +172,7 @@ function label(member) {
  * @param {Function} emit - diagnostic sink.
  */
 function checkTargetHints(doc, targets, emit) {
+  checkStatementHints(doc, targets, emit)
   const requested = targets.filter(target => target.name !== 'ts')
   if (requested.length === 0) return
   const members = []
@@ -207,6 +210,36 @@ function checkTargetHints(doc, targets, emit) {
       if (!hinted) {
         emit('W3010', member.hintLine, `member '${member.name}' has no ts body and no '### ${target.name}' hint`)
       }
+    }
+  }
+}
+
+/**
+ * Warn when a `# statement` section has no generation basis for a target
+ * (`W3010`, xl-check §3.3, xl-syntax §17).
+ *
+ * A statement is not symmetric with a member: a member without a ts body still
+ * prints an empty body, while a statement without one is a whole segment
+ * missing from the ts artifact. So `ts` is checked here too, whenever a ts
+ * build is in scope, and a `## <lang>` section (xl-syntax §16) is what covers
+ * the other targets.
+ * @param {object} doc - parsed document.
+ * @param {readonly object[]} targets - resolved target descriptors.
+ * @param {Function} emit - diagnostic sink.
+ */
+function checkStatementHints(doc, targets, emit) {
+  for (const decl of doc.decls) {
+    if (decl.kind !== 'statement' || decl.body !== null) continue
+    // A section with no body and no language section at all is already `E1110`;
+    // a hint on top of it would only repeat the same fact.
+    if (decl.sections.length === 0) continue
+    for (const target of targets) {
+      if (target.name === 'ts') {
+        emit('W3010', decl.line, 'statement has no ts body, so the ts artifact will not contain it')
+        continue
+      }
+      if (decl.sections.some(section => section.lang === target.name)) continue
+      emit('W3010', decl.line, `statement has no ts body and no '## ${target.name}' hint`)
     }
   }
 }

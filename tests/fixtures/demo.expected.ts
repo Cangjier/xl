@@ -98,3 +98,5 @@ export class cache<K extends string, V = any> {
   public hits: number = 0;
   public data: Map<K, V> = new Map();
 }
+
+console.log(pickFirst(RULES));

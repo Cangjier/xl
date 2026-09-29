@@ -319,3 +319,56 @@ test('a literal type and a type alias are kept verbatim', () => {
     '}',
   ].join('\n'))
 })
+
+test('a # statement body is printed verbatim, without export', () => {
+  const text = [
+    '# const MAX:int = 8',
+    'cap.',
+    '',
+    '# statement',
+    'entry.',
+    '```ts',
+    '  if (MAX > 0) {',
+    '    run();',
+    '  }',
+    '```',
+    '',
+  ].join('\n')
+  assert.equal(print(text), [
+    'export const MAX: number = 8;',
+    '',
+    'if (MAX > 0) {',
+    '  run();',
+    '}',
+  ].join('\n'))
+})
+
+test('every # statement section is its own segment, in source order', () => {
+  const text = [
+    '# statement',
+    '```ts',
+    'first();',
+    '```',
+    '',
+    '# class point',
+    '',
+    '# statement',
+    '```ts',
+    'second();',
+    '```',
+    '',
+  ].join('\n')
+  assert.equal(print(text), [
+    'first();',
+    '',
+    'export class point {',
+    '}',
+    '',
+    'second();',
+  ].join('\n'))
+})
+
+test('# statement without a ts block contributes no segment', () => {
+  const text = ['# statement', '## csharp', '```csharp', 'Main(args);', '```', ''].join('\n')
+  assert.equal(print(text), '')
+})

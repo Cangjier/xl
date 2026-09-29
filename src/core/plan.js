@@ -59,9 +59,33 @@ export function sourceBaseName(sourceRel) {
 
 /**
  * Declarations that carry no target-language type name and therefore share the
- * module file under `layout=type` (xl-cli §3.4).
+ * module file under `layout=type` (xl-cli §3.4). A `# statement` carries no
+ * name at all, but its code still needs a file to live in — the module file.
  */
-const MODULE_KINDS = new Set(['type', 'const', 'method'])
+const MODULE_KINDS = new Set(['type', 'const', 'method', 'statement'])
+
+/**
+ * Names recorded for a planned output: one per declaration, in source order.
+ *
+ * A `# statement` section declares no name, so it is labelled by its 1-based
+ * position among the file's statements (`# statement 1`): the plan must still
+ * tell a generator that this source carries top-level statements (xl-syntax §17).
+ * @param {readonly object[]} decls - the declarations of one source.
+ * @returns {string[]} the labels.
+ */
+function declaredNames(decls) {
+  const names = []
+  let statements = 0
+  for (const decl of decls) {
+    if (decl.kind !== 'statement') {
+      names.push(decl.name)
+      continue
+    }
+    statements += 1
+    names.push(`# statement ${statements}`)
+  }
+  return names
+}
 
 /**
  * Plan one source file for one target.
@@ -93,17 +117,16 @@ export function planSource(doc, sourceRel, target, options) {
         path: joinPath([root, directory, `${base}${target.ext}`]),
         base,
         kind: 'file',
-        names: doc.decls.map(decl => decl.name),
+        names: declaredNames(doc.decls),
       }],
     }
   }
 
   const targetRoot = joinPath([root, target.name])
   const outputs = []
-  const moduleNames = doc.decls
-    .filter(decl => MODULE_KINDS.has(decl.kind))
-    .map(decl => decl.name)
-  if (moduleNames.length > 0) {
+  const moduleDecls = doc.decls.filter(decl => MODULE_KINDS.has(decl.kind))
+  const moduleNames = declaredNames(moduleDecls)
+  if (moduleDecls.length > 0) {
     const moduleBase = typeFileBaseName(`${base}${MODULE_FILE_SUFFIX}`, target.name, naming)
     outputs.push({
       path: joinPath([targetRoot, directory, `${moduleBase}${target.ext}`]),

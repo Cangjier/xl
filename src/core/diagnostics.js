@@ -47,10 +47,11 @@ export const DIAG_CODES = {
   E1107: { severity: 'warning', help: '改名，避免产物撞名' },
   E1108: { severity: 'error', help: '写成 # type MemberKind = "field" | "method"' },
   E1109: { severity: 'error', help: '删除重复项，或补 - case <name>' },
+  E1110: { severity: 'error', help: '补一个 ts 默认语言代码块，或加 ## <lang> 段；没有正文的语句段没有生成依据' },
 
   E1201: { severity: 'error', help: '换成合法关键字，见语法 §2' },
-  E1202: { severity: 'error', help: '只保留该成员种类允许的修饰符（语法 §3、§8、§12–§15）' },
-  E1203: { severity: 'error', help: '补合法标识符名字' },
+  E1202: { severity: 'error', help: '只保留该成员种类允许的修饰符（语法 §3、§8、§12–§15、§17）' },
+  E1203: { severity: 'error', help: '补合法标识符名字；# statement 是匿名段，关键字后面什么都不写' },
   E1204: { severity: 'error', help: '检查类型写法，见语法 §6、§8、§12' },
   E1205: { severity: 'error', help: '改名' },
   E1206: { severity: 'error', help: '返回类型固定 void，一个类至多一个' },
@@ -73,9 +74,10 @@ export const DIAG_CODES = {
   E2003: { severity: 'warning', help: '不要手改产物；改动写回 *.xl.md' },
 
   // ── W3xxx generation-quality hints ───────────────────────────────────────
-  W3010: { severity: 'warning', help: '补一个 ts 默认语言代码块，或加 ### <target> 指示' },
+  W3010: { severity: 'warning', help: '补一个 ts 默认语言代码块，或加 ### <target> / ## <target> 指示' },
   W3011: { severity: 'warning', help: '补该语言的代码块，或删掉空壳子标题' },
   W3012: { severity: 'warning', help: '补内容，或删除该代码块' },
+  W3013: { severity: 'warning', help: '把依赖写进 # dependencies，默认语言块里只留可执行语句' },
   W3101: { severity: 'warning', help: '在 # dependencies 的 ## <lang> 段说明该依赖的来源' },
   W3102: { severity: 'warning', help: '补一句用途说明：它会进生成上下文，并成为产出代码注释' },
   W3103: { severity: 'warning', help: '补包用途说明，供非 ts 目标生成使用' },

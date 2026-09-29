@@ -298,3 +298,80 @@ test('indexAssign skips the arrow of a function type', () => {
   assert.equal(indexAssign('f:(item:int)=>bool = true'), 19)
   assert.equal(indexAssign('(item:int)=>bool'), -1)
 })
+
+test('# statement needs a body, and takes no name or modifier', () => {
+  assert.deepEqual(codes('# statement\n'), ['E1110'])
+  const named = ['# statement entry', '```ts', 'run();', '```', ''].join('\n')
+  assert.deepEqual(codes(named), ['E1203'])
+  const modified = ['# private statement', '```ts', 'run();', '```', ''].join('\n')
+  assert.deepEqual(codes(modified), ['E1202'])
+})
+
+test('# statement may sit anywhere: it constrains no declaration order', () => {
+  const first = [
+    '# statement', '```ts', 'run();', '```', '',
+    '# method make:()=>int', '```ts', 'return 1;', '```', '',
+  ].join('\n')
+  assert.deepEqual(codes(first), [])
+  const middle = [
+    '# method make:()=>int', '```ts', 'return 1;', '```', '',
+    '# statement', '```ts', 'run();', '```', '',
+    '# class point', '',
+  ].join('\n')
+  assert.deepEqual(codes(middle), [])
+  const last = ['# class point', '', '# statement', '```ts', 'run();', '```', ''].join('\n')
+  assert.deepEqual(codes(last), [])
+})
+
+test('# statement keeps its prose, its body, and its language sections', () => {
+  const text = [
+    '# statement',
+    '模块入口。',
+    '```ts',
+    '  run();',
+    '```',
+    '',
+    '## csharp',
+    '```csharp',
+    'Run();',
+    '```',
+    '',
+    '# statement',
+    '',
+    '## csharp',
+    '```csharp',
+    'Bootstrap();',
+    '```',
+    '',
+  ].join('\n')
+  const { doc, diagnostics } = parseXlMd(text, 'x.xl.md')
+  assert.deepEqual(diagnostics, [], 'a statement covered by ## <lang> is complete without a ts body')
+  assert.deepEqual(doc.decls.map(decl => decl.kind), ['statement', 'statement'])
+  assert.equal(doc.decls[0].name, '')
+  assert.equal(doc.decls[0].prose, '模块入口。')
+  assert.equal(doc.decls[0].body.rawBody, '  run();')
+  assert.deepEqual(doc.decls[0].sections.map(section => section.lang), ['csharp'])
+  assert.equal(doc.decls[1].body, null)
+})
+
+test('a second default block under # statement is E1301, a non-ts fence is E1302', () => {
+  const twice = ['# statement', '```ts', 'a();', '```', '', '```ts', 'b();', '```', ''].join('\n')
+  assert.deepEqual(codes(twice), ['E1301'])
+  const wrongFence = ['# statement', '```js', 'a();', '```', ''].join('\n')
+  assert.deepEqual(codes(wrongFence), ['E1110', 'E1302'])
+})
+
+test('a static import inside # statement is W3013, a dynamic one is not', () => {
+  const warnings = (text) => {
+    return diagnosticsOf(text)
+      .filter(item => item.severity === 'warning')
+      .map(item => item.code)
+      .sort()
+  }
+  const staticImport = ['# statement', '```ts', 'import x from "x";', 'run();', '```', ''].join('\n')
+  assert.deepEqual(warnings(staticImport), ['W3013'])
+  const reExport = ['# statement', '```ts', 'export { x } from "./x";', '```', ''].join('\n')
+  assert.deepEqual(warnings(reExport), ['W3013'])
+  const dynamic = ['# statement', '```ts', 'await import("node:fs");', 'import.meta.url;', '```', ''].join('\n')
+  assert.deepEqual(warnings(dynamic), [])
+})

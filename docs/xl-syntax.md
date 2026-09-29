@@ -8,7 +8,7 @@
 ```text
 # dependencies        ← 必须第一个，至多一次
 # namespace <name>    ← 可选；出现则必须是第二个标题
-…任意个声明…
+…任意个声明与 # statement…
 ```
 
 ## 1. 通用规则
@@ -35,6 +35,7 @@
 | `enum` | 枚举 | §9 |
 | `interface` | 接口 | §10 |
 | `class` | 类 | §11 |
+| `statement` | 顶层语句：模块加载时执行一次 | §17 |
 | `field` | 字段 | §12 |
 | `property` | 属性 | §13 |
 | `constructor` | 构造器 | §15 |
@@ -77,6 +78,7 @@
 
 - 与 `static` / `readonly` 叠加时顺序任意。
 - 默认为 `public`。
+- `# statement`（§17）不接受任何修饰符：写上 `public` / `protected` / `private` / `static` / `readonly` 报 `E1202`。
 
 ## 4. `# dependencies`
 
@@ -304,7 +306,7 @@ this.y = y ?? 0;
 
 | 所在父标题 | 子标题 |
 | --- | --- |
-| `# dependencies` / `# enum` / `# namespace` | `## <lang>` |
+| `# dependencies` / `# enum` / `# namespace` / `# statement` | `## <lang>` |
 | `## field` / `## property` / `## method` | `### <lang>` |
 | `### get` / `### set` | `#### <lang>` |
 
@@ -325,3 +327,34 @@ using var http = new HttpClient();
 return await http.GetStringAsync(url);
 ```
 ````
+
+## 17. `# statement`
+
+模块级可执行语句：文件被加载时按源文件顺序执行。
+
+````md
+# method Main:(args:Array<string>)=>void
+```ts
+…
+```
+
+# statement
+进程入口：模块被 import 时执行一次。
+```ts
+Main(process.argv.slice(2));
+```
+
+## csharp
+```csharp
+Main(args);
+```
+````
+
+- 模板：`# statement`，**不带名字**，也不接受任何修饰符——写修饰符报 `E1202`，多写一个词报 `E1203`。
+- 正文取该段的默认语言（`ts`）代码块，与 `# method` 同规则：一个段至多一个默认语言块（多个报 `E1301`），语言覆盖段用 `## <lang>`（§16）。
+- 允许出现多次，也可以出现在文件的任意位置；执行顺序＝源文件出现顺序。
+  xl **不做顺序检查**：语句引用同文件中后置的 `# const` / `# class` 时的 TDZ 风险由作者承担。
+- 语句不声明名字：不进产物的 `export` 清单，也不能被 `# dependencies` 的 `import { … }` 引用（§4）。
+- 说明散文与 `## <lang>` 段是其它目标的生成依据，不进 ts 产物（§1、§16）。
+- 既没有非空的默认语言块、也没有任何带代码块的 `## <lang>` 段时是错误（`xl-check.md` 的 `E1110`）：这个段没有任何生成依据。
+- 默认语言块里写静态顶层 `import`（或带 `from` 的 `export`）是提示（`xl-check.md` 的 `W3013`）：它会被提升到产物头之前；依赖一律写进 `# dependencies`（§4）。

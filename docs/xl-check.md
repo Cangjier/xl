@@ -123,7 +123,7 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 | 码 | 级别 | 规则 | 触发示例 | help |
 | --- | --- | --- | --- | --- |
 | `E1001` | error | 文件为空，或只有空白 / 只有散文，没有任何标题 | 空 `*.xl.md` | 写 `# namespace` 或直接写一级声明 |
-| `E1002` | error | 未知一级段落种类（合法：`dependencies` / `namespace` / `type` / `const` / `method` / `enum` / `interface` / `class`） | `# struct point` | 换成合法关键字，见语法 §2 |
+| `E1002` | error | 未知一级段落种类（合法：`dependencies` / `namespace` / `type` / `const` / `method` / `enum` / `interface` / `class` / `statement`） | `# struct point` | 换成合法关键字，见语法 §2 |
 | `E1003` | error | `# namespace` 名字缺失或非法 | `# namespace` / `# namespace 9a` | 名字用小写标识符，如 `# namespace demo` |
 | `E1004` | error | `# dependencies` 不是第一个段落（语法 §0：必须第一个、至多一次） | `# namespace demo` 之后又出现 `# dependencies` | 把 `# dependencies` 移到文件最前面 |
 | `E1005` | error | 段落或成员顺序非法（模块级声明必须排在类型声明之前；`### get` / `### set` 必须紧跟其 `property`） | 模块级 `# method` 出现在 `# class` 之后；`### get` 挂在 `## field` 下 | 按语法 §0 的骨架重排：`dependencies → namespace → 模块级声明 → 类型声明` |
@@ -142,14 +142,15 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 | `E1107` | warning | 跨文件同名一级类型（同一次检查范围内） | `pkg/a.xl.md` 与 `pkg/b.xl.md` 都有 `point` | 改名为 `aPoint` / `bPoint`，避免产物撞名 |
 | `E1108` | error | `# type` 缺少 `= <原文>` | `# type MemberKind` | 写成 `# type MemberKind = "field" \| "method"` |
 | `E1109` | error | `# enum` 没有 `- case` 成员，或成员重名 | 两个 `- case red` | 删除重复项，或补 `- case <name>` |
+| `E1110` | error | `# statement` 既没有非空的默认语言（ts）块，也没有任何带代码块的 `## <lang>` 段（语法 §17） | 光秃秃的 `# statement` | 补一个 `ts` 默认语言代码块，或加 `## <lang>` 段；没有正文的语句段没有任何生成依据 |
 
 **C. 成员层**
 
 | 码 | 级别 | 规则 | 触发示例 | help |
 | --- | --- | --- | --- | --- |
 | `E1201` | error | 未知成员种类（合法：`field` / `property` / `method` / `constructor`） | `## attr x:int` | 换成合法关键字，见语法 §2 |
-| `E1202` | error | 修饰符非法或组合非法 | `constructor` 带 `static` / `readonly` / `async`；`readonly` 用在 `property` / `method`；interface 成员带 `private` / `protected`；`# protected` 一级声明；枚举成员带修饰符 | 只保留该成员种类允许的修饰符（语法 §3、§8、§12–§15） |
-| `E1203` | error | 成员名字缺失或非法 | `## field :int = 0` | 补合法标识符名字 |
+| `E1202` | error | 修饰符非法或组合非法 | `constructor` 带 `static` / `readonly` / `async`；`readonly` 用在 `property` / `method`；interface 成员带 `private` / `protected`；`# protected` 一级声明；`# statement` 带任意修饰符；枚举成员带修饰符 | 只保留该成员种类允许的修饰符（语法 §3、§8、§12–§15、§17） |
+| `E1203` | error | 成员名字缺失或非法，或 `# statement` 后面多写了名字 | `## field :int = 0` / `# statement entry` | 补合法标识符名字；`# statement` 是匿名段，关键字后面什么都不写 |
 | `E1204` | error | 类型标注非法：括号 / 尖括号不配对、未知类型名、`?` 写在非成员 / 非参数位置 | `## field x:Array<int` / `## method m:()=>Foo` | 检查类型写法，见语法 §6、§8、§12 |
 | `E1205` | error | 同一类型内成员重名（含 `property` 展开后的访问器名与同名字段冲突） | 两个 `## field x:int` | 改名 |
 | `E1206` | error | `constructor` 重复，或返回值不是 `void` | `## constructor:(x:int)=>int` / 两个 `constructor` | 返回类型固定 `void`，一个类至多一个 |
@@ -174,9 +175,10 @@ pkg/demo.xl.md:73:1: error[E1202]: modifier 'readonly' is not valid on property
 
 | 码 | 级别 | 规则 | help |
 | --- | --- | --- | --- |
-| `W3010` | warning | 可执行成员（类 / 接口外的 `method`、`constructor`、`property` 的 get / set、带初始值的 `field`）既无默认语言（ts）代码块，也无 `### <target>` 指示（提示语言由 `--target` 决定，缺省 `ts`） | 补一个 `ts` 默认语言代码块，或加 `### csharp` 指示 |
+| `W3010` | warning | 可执行成员（类 / 接口外的 `method`、`constructor`、`property` 的 get / set、带初始值的 `field`、`# statement`）既无默认语言（ts）代码块，也无 `### <target>` / `## <target>` 指示（提示语言由 `--target` 决定，缺省 `ts`）；`# statement` 没有默认语言块时，目标里含 `ts` 也报——那一段会从 ts 产物里整段消失 | 补一个 `ts` 默认语言代码块，或加 `### csharp` / `## csharp` 指示 |
 | `W3011` | warning | `### <lang>` / `## <lang>` 只有说明文字、没有代码块——合法但生成信息量低 | 补该语言的代码块，或删掉空壳子标题 |
 | `W3012` | warning | 代码块为空（围栏之间只有空白） | 补内容，或删除该代码块 |
+| `W3013` | warning | `# statement` 的默认语言块里出现静态顶层 `import`（或带 `from` 的 `export`）：它会被提升到产物头之前（语法 §17） | 把依赖写进 `# dependencies`（语法 §4），默认语言块里只留可执行语句 |
 | `W3101` | warning | 目标语言的覆盖段引用了 ts 侧依赖（如 `_`、`fetch`、`File.ReadAllText` 对应的 `rf`）但 `# dependencies` 里没有对应说明 | 在 `# dependencies` 的 `## <lang>` 段说明该依赖的来源 |
 | `W3102` | warning | 成员说明（标题下的散文）为空 | 补一句用途说明：它会进 harness prompt，并成为产出代码注释 |
 | `W3103` | warning | `# namespace` 的说明为空 | 补包用途说明，供 harness 通道使用 |

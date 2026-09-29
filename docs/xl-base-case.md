@@ -183,6 +183,17 @@ return v < 0 ? 0 : v;
 ```ts
 new Map()
 ```
+
+# statement
+模块被加载时执行一次：把第一条规则码打出来。
+```ts
+console.log(pickFirst(RULES));
+```
+
+## csharp
+```csharp
+Console.WriteLine(pickFirst(RULES));
+```
 ````
 
 ## 输出 ts 完整代码
@@ -292,4 +303,6 @@ export class cache<K extends string, V = any> {
   public hits: number = 0;
   public data: Map<K, V> = new Map();
 }
+
+console.log(pickFirst(RULES));
 ```

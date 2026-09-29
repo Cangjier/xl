@@ -107,7 +107,12 @@ function resolveDependencies(entry, loadDocument) {
       continue
     }
     documents.push(loaded)
-    const declared = new Map(loaded.doc.decls.map(decl => [decl.name, decl.kind]))
+    // `# statement` declares no name, so it exports nothing to import.
+    const declared = new Map(
+      loaded.doc.decls
+        .filter(decl => decl.kind !== 'statement')
+        .map(decl => [decl.name, decl.kind]),
+    )
     for (const name of record.names) {
       const kind = declared.get(name.name)
       if (kind === undefined) {
@@ -243,12 +248,20 @@ export function languageContext(doc, target, prepared, src) {
   }
   collect('# dependencies', doc.dependencies?.sections)
   collect('# namespace', doc.namespace?.sections)
+  let statements = 0
   for (const decl of doc.decls) {
-    collect(`${decl.kind} ${decl.name}`, decl.sections)
+    // A `# statement` declares no name, so it is identified by position: that is
+    // enough for a generator to line its `## <lang>` sections up (xl-syntax §17).
+    let owner = `${decl.kind} ${decl.name}`
+    if (decl.kind === 'statement') {
+      statements += 1
+      owner = `# statement ${statements}`
+    }
+    collect(owner, decl.sections)
     for (const member of decl.members ?? []) {
-      collect(`${decl.kind} ${decl.name}.${member.name}`, member.sections)
+      collect(`${owner}.${member.name}`, member.sections)
       for (const accessor of member.accessors ?? []) {
-        collect(`${decl.kind} ${decl.name}.${member.name}.${accessor.kind}`, accessor.sections)
+        collect(`${owner}.${member.name}.${accessor.kind}`, accessor.sections)
       }
     }
   }
@@ -256,6 +269,7 @@ export function languageContext(doc, target, prepared, src) {
   const imports = []
   for (const dependency of dependencyDocuments) {
     for (const decl of dependency.doc.decls) {
+      if (decl.kind === 'statement') continue
       imports.push({ from: dependency.src, name: decl.name, kind: decl.kind })
     }
   }

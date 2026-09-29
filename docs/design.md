@@ -106,6 +106,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 结构不符的产物绝不落盘 | `verify.js` + `artifact.js` | `tests/artifact.test.js` |
 | 覆盖前把旧产物归档，只保留最近 N 版 | `cache.js` | `tests/artifact.test.js` |
 | 计划外的路径一律拒绝 | `artifact.js` `emitArtifacts` | `tests/artifact.test.js` |
+| `# statement` 段逐字节进入 ts 产物，且不参与导出与结构校验 | `emit-ts.js` `renderStatement`、`parse.js` `exportedNamesOf`、`verify.js` `verifyStructure` | `tests/conformance.test.js`、`tests/emit-ts.test.js` |
 | 码表里每个码都有产生它的地方 | `scripts/code-map.mjs` | `pnpm run codes` |
 
 `xl:prompt` 的定义值得单独说明：它是 `structureSummary + languageContext + 依赖摘要 + layout + naming` 的哈希，**不含**源文件原文（源文件原文由 `xl:sha256` 表达）。这样「改了注释」不会让非 ts 产物失效，而「改了 `## csharp` 段」会。
@@ -122,7 +123,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | --- | --- | --- |
 | `scan.js` `targets.js` | 路径展开、目标声明 | `E0001` `E0002` `E0003` `E0004` |
 | `source.js` | 文件字节 | `E0005` |
-| `parse.js` | 单个文件的 IR | `E1001`–`E1005`（段落顺序由 `parseXlMd` 主循环判）、`E1006`（只判 `xl` 块的行形态）、`E1101`–`E1103` `E1106` `E1108` `E1109`、`E1201`–`E1212`、`E1301`–`E1305`、`W3011` `W3012` `W3103` |
+| `parse.js` | 单个文件的 IR | `E1001`–`E1005`（段落顺序由 `parseXlMd` 主循环判）、`E1006`（只判 `xl` 块的行形态）、`E1101`–`E1103` `E1106` `E1108`–`E1110`、`E1201`–`E1212`、`E1301`–`E1305`、`W3011` `W3012` `W3013` `W3103` |
 | `check.js` | 整个文档 + 依赖索引 + 目标列表 | `E1104` `E1105`（目标解析与接口成员）、`W3010` `W3101` `W3102` `W3104` |
 | `build.js` | 文件系统 | `E1006`（依赖目标读不到或没有该导出）、`E1107`、`E2001` `E2002` `E2003` |
 | `artifact.js` | 生成者提交的内容 | `E2001` `E2002` `E4002` |

@@ -104,7 +104,7 @@ xl build [paths...] [options]
 
 * `ts` 代码块**原样**成为方法体 / 字段初始化表达式，只做最小规范化（统一缩进、去尾随空白）。
 * 由声明本身派生出的包装规则（完整列表见 `xl-emit-ts.md`，期望产物见 [`xl-base-case.md`](./xl-base-case.md)）：
-  * 顶层 `# interface` / `# class` / `# enum` / `# type` / `# const` / `# method` → 加 `export`；
+  * 顶层 `# interface` / `# class` / `# enum` / `# type` / `# const` / `# method` → 加 `export`；`# statement`（语法 §17）不加任何前缀，默认语言块原样成为一个段落；
   * `readonly field id:string` → `public readonly id: string`（`static`、`private` 同理）；
   * `## property label:string` + `### get` / `### private set` → 私有字段 `#label` + `get` / `set` 访问器；
   * `async (url:string)=>string` → `public async load(url: string): Promise<string>`；

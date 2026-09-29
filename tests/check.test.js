@@ -276,3 +276,25 @@ test('an ignored code is removed from the result', () => {
     dropWorkspace(cwd)
   }
 })
+
+test('W3010 covers a # statement with no ts body', () => {
+  const source = [
+    '# statement',
+    '## csharp',
+    '```csharp',
+    'Main(args);',
+    '```',
+    '',
+  ].join('\n')
+  // `ts` is reported too: without a ts body the whole section is missing from
+  // the ts artifact, which no member-level warning would catch.
+  assert.deepEqual(codes({ 'a.xl.md': source }), ['W3010'])
+  assert.deepEqual(codes({ 'a.xl.md': source }, ['csharp']), [])
+})
+
+test('a # statement with a ts body needs no per-target hint', () => {
+  const source = ['# statement', '```ts', 'Main([]);', '```', ''].join('\n')
+  // The ts body is the generation basis for every target, so no W3010 here;
+  // W3104 (a target with no override section) is a different rule.
+  assert.ok(!codes({ 'a.xl.md': source }, ['csharp']).includes('W3010'))
+})

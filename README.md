@@ -232,6 +232,7 @@ xl --version | -v                版本
 | 5 | `layout=type` 的模块文件 | §3.4 只说模块级 `# method` / `# const` 合并进 `<源文件基名>Module.<ext>` | `type` / `const` / `method` 三种模块级声明都进该文件（三者都没有目标语言类型名） |
 | 6 | `--flat` 与 `type` 布局 | §3.5 只说「所有产物写到 --out 根」 | `--flat` 在两种布局下都丢弃源文件相对目录（type 布局仍保留目标语言层） |
 | 7 | `W3010` 的适用范围 | §3.3 列举「类 / 接口外的 method、constructor、property 的 get / set、带初始值的 field」 | 对「需要生成依据的可执行成员」触发：模块级 `# method`、类 `## method`、`## constructor`、以及无初始值且访问器无体的 `property`。带内联初始值或代码块的 field 自身已给出依据，不触发 |
+| 13 | `# statement` 的落点 | 语法 §17 / `xl-emit-ts` §14 只规定语法与产物 | 一律按「匿名段」处理：不进 `MODULE_SECTION_KINDS` / `TYPE_SECTION_KINDS`（既不触发也不重置 `E1005`）、不参与 `E1106`、不导出不可 import；`layout=type` 下与 `type` / `const` / `method` 同住模块文件（否则只有 statement 的源文件会计划出 0 个产物），计划里的 `names` 用位置标签 `# statement <n>`；`structureSummary` 只在源文件出现 statement 时多出 `statements` 字段，所以没有 statement 的文件 `xl:prompt` 不变 |
 | 8 | `W3101` | 描述了意图，未给算法 | 只对 ts 依赖块**实际绑定**的名字（`import x` / `import { x as y }`）触发，且 `# dependencies` 里没有该语言段时 |
 | 9 | `--dry-run` 与 `E2001` / `E2003` | §3.6 说 `--dry-run` 时手改只提示；未说冲突 | `--dry-run` 照常报告输出冲突与手改提示，只是不写盘——静默跳过冲突没有价值 |
 | 10 | `xl check` 的命令地位 | `xl-cli.md` 开头说 `xl` 只有 `xl build`，但 `xl-check.md` 定义了 `xl check`，`E0003` 的 help 指向 `xl targets` | 三个命令都实现 |

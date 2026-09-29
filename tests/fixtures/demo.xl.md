@@ -177,3 +177,14 @@ return v < 0 ? 0 : v;
 ```ts
 new Map()
 ```
+
+# statement
+模块被加载时执行一次：把第一条规则码打出来。
+```ts
+console.log(pickFirst(RULES));
+```
+
+## csharp
+```csharp
+Console.WriteLine(pickFirst(RULES));
+```

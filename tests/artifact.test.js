@@ -215,3 +215,42 @@ test('emit can skip verification when the caller asks', () => {
     dropWorkspace(cwd)
   }
 })
+
+test('a statement section is part of the contract and reaches the non-ts context', () => {
+  const source = [
+    '# namespace demo',
+    'demo package.',
+    '',
+    '# class point',
+    '',
+    '## field x:int = 0',
+    'x.',
+    '',
+    '# statement',
+    'entry.',
+    '```ts',
+    'run();',
+    '```',
+    '',
+    '## csharp',
+    '```csharp',
+    'Run();',
+    '```',
+    '',
+  ].join('\n')
+  const cwd = makeWorkspace({ 'demo.xl.md': source })
+  try {
+    const opened = contextFor({ cwd, source: 'demo.xl.md', target: 'csharp', env: {} })
+    assert.deepEqual(opened.context.outputs.map(output => output.path), [
+      'csharp/DemoModule.cs',
+      'csharp/Point.cs',
+    ])
+    assert.deepEqual(opened.context.summary.statements, [{ index: 1, hasBody: true, sections: ['csharp'] }])
+    assert.ok(opened.context.language.sections.some(
+      section => section.owner === '# statement 1' && section.code === 'Run();',
+    ))
+    assert.match(opened.context.promptHash, /^[0-9a-f]{16}$/)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})

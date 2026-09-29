@@ -132,3 +132,18 @@ test('flattening two same-named sources at different depths is a conflict', () =
   const second = planSource(doc(), 'b/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', flat: true, naming: 'idiomatic' })
   assert.equal(detectConflicts([first, second]).length, 1)
 })
+
+test('a statement is labelled by position, and it alone still plans a module file', () => {
+  const text = ['# statement', '```ts', 'run();', '```', ''].join('\n')
+  const parsed = parseXlMd(text, 'pkg/demo.xl.md')
+  assert.deepEqual(parsed.diagnostics.filter(item => item.severity === 'error'), [])
+  const filePlan = planSource(parsed.doc, 'pkg/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(filePlan.outputs[0].names, ['# statement 1'])
+  const typePlan = planSource(parsed.doc, 'pkg/demo.xl.md', resolveTarget('csharp', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(typePlan.outputs.map(output => output.path), ['dist/csharp/pkg/DemoModule.cs'])
+  assert.deepEqual(typePlan.outputs[0].names, ['# statement 1'])
+  assert.equal(typePlan.outputs[0].kind, 'module')
+  const two = ['# statement', '```ts', 'a();', '```', '', '# statement', '```ts', 'b();', '```', ''].join('\n')
+  const both = planSource(parseXlMd(two, 'pkg/demo.xl.md').doc, 'pkg/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(both.outputs[0].names, ['# statement 1', '# statement 2'])
+})

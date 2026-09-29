@@ -18,13 +18,38 @@ import { mapType } from './types.js'
  * @returns {object} the digest.
  */
 export function structureSummary(doc) {
-  return {
+  const summary = {
     file: doc.file,
     namespace: doc.namespace === null ? null : doc.namespace.name,
     module: doc.decls.filter(decl => decl.kind === 'type' || decl.kind === 'const' || decl.kind === 'method')
       .map(decl => summarizeModule(decl)),
     types: doc.decls.filter(decl => decl.kind === 'enum' || decl.kind === 'interface' || decl.kind === 'class')
       .map(decl => summarizeType(decl)),
+  }
+  // Present only when the source has statements, so a document without any
+  // keeps the prompt hash it had before `# statement` existed.
+  const statements = doc.decls.filter(decl => decl.kind === 'statement')
+  if (statements.length > 0) {
+    summary.statements = statements.map((decl, index) => summarizeStatement(decl, index + 1))
+  }
+  return summary
+}
+
+/**
+ * Summarize one `# statement` section (xl-emit-ts §14).
+ *
+ * It declares no name, so the digest identifies it by position and records only
+ * what a generator needs: whether a ts body exists and which target sections
+ * accompany it. The body text itself is the source's business, not the digest's.
+ * @param {object} decl - the statement declaration.
+ * @param {number} ordinal - 1-based position among the file's statements.
+ * @returns {object} the digest entry.
+ */
+function summarizeStatement(decl, ordinal) {
+  return {
+    index: ordinal,
+    hasBody: decl.body !== null,
+    ...decl.sections.length === 0 ? {} : { sections: decl.sections.map(section => section.lang) },
   }
 }
 

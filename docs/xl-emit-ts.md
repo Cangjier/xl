@@ -38,14 +38,14 @@
 // DO NOT EDIT — 修改请改 xl.md 并重新生成
 
 <1> # dependencies 的默认语言（ts）代码块
-<2> 一级声明，按源文件出现顺序
+<2> 一级声明与 # statement 段，按源文件出现顺序
 ```
 
 | 段 | 来源 | 规则 |
 | --- | --- | --- |
 | 产物头 3 行 | `xl` 统一追加 | `xl.json` 的 `build.header: false` 时不写；ts 头用 `//`（`xl-cli.md` §3.6） |
 | 正文 `<1>` | `# dependencies` 的 ```` ```ts ```` 块 | 按块出现顺序拼接，块之间以空行分隔；没有该块则不产生首段 |
-| 正文 `<2>` | 一级声明 | `# type` / `# const` / `# method` / `# enum` / `# interface` / `# class`，**顺序与源文件一致**，不重排、不分组 |
+| 正文 `<2>` | 一级声明与 `# statement` | `# type` / `# const` / `# method` / `# enum` / `# interface` / `# class` / `# statement`（§14），**顺序与源文件一致**，不重排、不分组 |
 | 顶层空行 | 打印器 | 相邻两段之间恰好一个空行 |
 
 * `# namespace` 只用于非 ts 目标的包 / 命名空间映射，**不产生 ts 代码**（ts 的模块边界是文件，不是 namespace）。
@@ -469,4 +469,34 @@ export class box<T extends object> extends point implements printable {
 | 说明散文 / 成员注释 | 只作生成上下文，**不**转成 tsdoc |
 | `# dependencies` 的 ```` ```xl ```` 块 | 只用于跨文件校验与 import 生成（§3） |
 
-**非 ts 目标（harness 通道）对 ts 侧的要求**：所有可执行成员（方法、访问器、带初始值的字段、构造函数）都应有默认语言（ts）代码块或 `### <lang>` 说明，否则目标语言生成缺依据（`xl-check.md` 的 `W3010`）。
+**非 ts 目标（harness 通道）对 ts 侧的要求**：所有可执行成员（方法、访问器、带初始值的字段、构造函数）都应有默认语言（ts）代码块或 `### <lang>` 说明，否则目标语言生成缺依据（`xl-check.md` 的 `W3010`）。`# statement` 同此，只是覆盖段的层级是 `## <lang>`（语法 §16）。
+
+---
+
+## 14. `# statement`
+
+`# statement`（语法 §17）的默认语言（`ts`）代码块成为产物正文里的一个段落，**不加 `export`**、不加任何前缀：
+
+````md
+# statement
+进程入口。
+```ts
+Main(process.argv.slice(2));
+```
+````
+
+```ts
+Main(process.argv.slice(2));
+```
+
+| 源特征 | 产物 |
+| --- | --- |
+| 默认语言块 | 该段落原样（经 §11 的最小规范化） |
+| 多个 `# statement` 段 | 各成一个段落，位置与源文件一致，段间恰好一个空行 |
+| 说明散文 | 不进产物（§1） |
+| `## <lang>` 段 | 不进产物，只作非 ts 通道的生成依据（§13） |
+| 没有默认语言块 | 该段不进产物正文；`ts` 不在目标里时不需要它（`xl-check.md` 的 `W3010`） |
+| 默认语言块里出现静态 `import` / 带 `from` 的 `export` | 提示 `W3013`（`xl-check.md`）：会被提升到产物头之前 |
+
+* 段内没有非空的默认语言块、也没有带代码块的 `## <lang>` 段时，源文件本身就是错的（`xl-check.md` 的 `E1110`）。
+* `# statement` 不声明名字：不出现在产物的导出清单里，也不参与结构回读校验（类型集合 / 成员名 / 参数个数）。

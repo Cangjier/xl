@@ -342,6 +342,22 @@ function renderClass(decl) {
 }
 
 /**
+ * Render one `# statement` section: its default-language body verbatim, as one
+ * segment of the artifact (xl-emit-ts §14).
+ *
+ * Statements declare nothing, so there is no `export` prefix and no head to
+ * print. A section without a body contributes no segment at all: the ts
+ * printer never invents an empty statement.
+ * @param {object} decl - the statement declaration.
+ * @returns {string[]} rendered lines.
+ */
+function renderStatement(decl) {
+  if (decl.body === null) return []
+  const code = normalizeCode(decl.body.rawBody)
+  return code === '' ? [] : code.split('\n')
+}
+
+/**
  * Render one first-level declaration.
  * @param {object} decl - the declaration.
  * @returns {string[]} rendered lines.
@@ -360,6 +376,8 @@ export function renderDecl(decl) {
       return renderInterface(decl)
     case 'class':
       return renderClass(decl)
+    case 'statement':
+      return renderStatement(decl)
     default:
       return []
   }
