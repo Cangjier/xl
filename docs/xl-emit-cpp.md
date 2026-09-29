@@ -2,7 +2,7 @@
 
 > **这不是直出通道的规范，而是 DSH 会话在编译 `*.xl.md` 到 C++ 时的推荐方案。**
 > `cpp` 走**计划通道**（[`xl-cli.md`](./xl-cli.md) §3.4）：`xl` 只给出产物路径、结构契约与语言上下文，代码由会话里的 agent 写、经 `xl_emit` 落盘。所以本文里的每一条都是**默认约定**，不是 `xl` 会校验的字节契约：`xl_emit` 只强制「类型集合 / 成员名集合 / 参数个数」这三项结构回读（`xl-cli.md` §3.4），其余取舍（容器选型、命名风格、要不要折叠成员）由生成者判断。
-> 什么时候可以偏离本文：`*.xl.md` 里的 `## cpp` / `### cpp` / `#### cpp` 覆盖段、目标仓库自己的编码规范、或既有实现（`xl_cache` 给出的上一版）。**覆盖段与既有实现优先于本文**（§11）。
+> 什么时候可以偏离本文：`*.xl.md` 里的 `## cpp` / `### cpp` / `#### cpp` 覆盖段、目标仓库自己的编码规范、或既有实现（`xl_cache` 给出的上一版）。**覆盖段与既有实现优先于本文**（§12）。
 > 语法以 [`xl-syntax.md`](./xl-syntax.md)（下称「语法」）为唯一事实来源；ts 直出的同类映射见 [`xl-emit-ts.md`](./xl-emit-ts.md)（本文多处与它同构，便于对照）；诊断码见 [`xl-check.md`](./xl-check.md)。
 
 > 与 `ts` 通道的根本差别：`ts` 的代码块**就是**目标代码本体，打印器只做包装；C++ 的 `ts` 代码块**只是行为说明**，必须被改写成 C++。本文就是这份改写规则的默认答案。
@@ -18,10 +18,11 @@
 | 布局 | `layout = type`：`enum` / `interface` / `class` 各成一文件；模块级 `# type` / `# const` / `# method` / `# statement` 合并进 `<源文件基名>_module.{h,cpp}` |
 | 命名 | 文件名按 `--naming` 变换，`idiomatic` 下 cpp 用 `snake_case`（`HTTPClient` → `http_client.h`）；**输出路径以 `xl_context` 为准，不要自己拼** |
 | 部件 | `.cpp` 带 `requires: "bodies"`，只在单元确实有可执行内容时才被计划（空模板类只有 `.h`，不要交一个空的 `.cpp`） |
-| 代码块 | `ts` 块是行为说明；`### cpp` / `#### cpp` / `## cpp` 块是**可直接采用的实现**（§11） |
+| 代码块 | `ts` 块是行为说明；`### cpp` / `#### cpp` / `## cpp` 块是**可直接采用的实现**（§12） |
 | 手工添加 | 不许发明 IR 里没有的公开 API；内部辅助（`namespace {}` 里的函数、私有 `static` 成员）必须私有、且只服务于 IR 里已有的成员 |
 | 确定性 | 同一 IR + 同一上下文应得到同一份代码：不写时间戳、随机名、机器相关路径；换行 LF；文件末尾恰好一个换行 |
 | 编码 | UTF-8 无 BOM；产物头与指纹由 `xl_emit` 统一追加（[`../README.md`](../README.md) §3.2），**生成者不要自己写 `@generated` 头** |
+| 构建文件 | **也由生成者负责**：`<out>/cpp/CMakeLists.txt` 是常驻文件，`xl` **不**计划它、**不**校验它、**不**覆盖它；构建树必须落在 `<out>/cpp/build/` 之内（§11） |
 
 ---
 
@@ -37,7 +38,8 @@
 #include <cstdint>
 #include <string>
 
-#include "demo/util.h"
+// 依赖导入：路径相对 <out>/cpp/（这里是 dist/cpp/pkg/util.h）
+#include "pkg/util.h"
 
 namespace demo {
 
@@ -88,7 +90,7 @@ void point::move(int32_t dx, int32_t dy) noexcept {
 }  // namespace demo
 ```
 
-规则（除非目标仓库另有约定，§11）：
+规则（除非目标仓库另有约定，§12）：
 
 1. **头文件保护**用 `#ifndef` / `#define` / `#endif`，宏名取「命名空间 + 文件名」的大写下划线形式（`DEMO_POINT_H`）；`#pragma once` 同样可用，但一个仓库里要统一。`#endif` 后面写上 `// DEMO_POINT_H` 便于阅读。
 2. **包含顺序**：标准库 → 第三方 → 项目内，组内按字典序；`#include "…"` 用从包含根算起的相对路径，不要用 `../` 上跳。
@@ -104,7 +106,7 @@ void point::move(int32_t dx, int32_t dy) noexcept {
 
 ### 3.1 `# dependencies` 的 ```` ```xl ```` 块
 
-每行 `import { … } from "./util.xl.md"` 生成一条 include：去掉 `.xl.md` 后缀、按 `--naming` 变换基名、套上命名空间目录。
+每行 `import { … } from "./util.xl.md"` 生成一条 include：去掉 `.xl.md` 后缀、按 `--naming` 变换基名，**然后按「被包含的那个产物在 `dist/cpp/` 下的相对路径」拼路径**。
 
 ````md
 # dependencies
@@ -113,11 +115,15 @@ import { level, describe } from "./util.xl.md"
 ```
 ````
 
+`pkg/demo.xl.md` 里的这行 `import` 指向 `pkg/util.xl.md`，它的产物是 `dist/cpp/pkg/util.h`：
+
 ```cpp
-#include "demo/util.h"
+#include "pkg/util.h"
 ```
 
-* 导入的名字决定你要**用到**什么：只用到**类名**（且只以引用 / 指针出现、不访问成员）时可以改成前置声明 `namespace demo { class point; }`，用到成员、值、或枚举值时必须 include 完整定义（`enum class` 的前置声明还要写底层类型，得不偿失）。
+* **规则**：`#include` 的路径 = 目标产物相对于 `<out>/cpp/` 的路径（`xl_context` 报出的产物路径去掉 `<out>/cpp/` 前缀）。**不要**由命名空间推导目录名——§3.3 的命名空间与目录层级是两件互不相干的事，`pkg/demo.xl.md` 用 `# namespace demo` 时路径仍是 `pkg/…`。
+* 引入根由构建文件提供（§11：`target_include_directories(... "<out>/cpp")`），所以同一棵树里的任意文件都能用同一条路径包含到同一个头文件，与被包含者 / 包含者各自在哪一层无关。
+* 导入的名字决定你要**用到**什么：只用到**类名**（且只以引用 / 指针出现、不访问成员）时可以改成前置声明（`namespace demo { class point; }`，命名空间取该类型所在的那个），用到成员、值、或枚举值时必须 include 完整定义（`enum class` 的前置声明还要写底层类型，得不偿失）。
 * 同一个目标模块已在手工 include 里出现时**不要重复生成**（与 `xl-emit-ts.md` §3 同规则）。
 * 依赖文件不参与本次构建、也不会被自动编译（`xl-cli.md` §3.2）：它引出的符号要在目标工程里真实存在，否则链接失败。
 
@@ -126,7 +132,7 @@ import { level, describe } from "./util.xl.md"
 * ```` ```ts ```` 块是**宿主语言**的依赖（`lodash`、`node:fs`…），C++ 里没有对应物：
   * 若该依赖表达的能力在目标工程里有等价物（如 `node:fs` → `<fstream>`），按 `### cpp` / `## cpp` 段的说明或目标仓库惯例替换；
   * 若没有等价物，**显式告诉调用方**（`xl_emit` 之后在会话里说明），不要静默丢掉——一个引用了它的函数体会因此无法实现。
-* `# dependencies` 下的 `## cpp` 段（若存在）给出该单元的 include 清单与第三方依赖，**以它为准**（§11）。
+* `# dependencies` 下的 `## cpp` 段（若存在）给出该单元的 include 清单与第三方依赖，**以它为准**（§12）。
 
 ### 3.3 命名空间推导（按顺序取第一条命中）
 
@@ -139,6 +145,7 @@ import { level, describe } from "./util.xl.md"
 | 5 | 都没有 | 由源文件相对目录推导，`pkg/demo.xl.md` → `pkg::demo`；推导不出就用文件基名 |
 
 * `# namespace` 的**名字**在 xl 里不产生代码（`xl-emit-ts.md` §2 的同类规则），所以它是「推荐值」而不是强制值：落在既有工程里时要服从该工程。
+* **命名空间不决定任何路径**：产物路径由 `xl_context` 给出，`#include` 路径由相对 `<out>/cpp/` 的位置给出（§2.1、§3.1），文件名由 `--naming` 决定。三者互相独立，别用命名空间去推目录。
 * 内部辅助一律放进匿名命名空间（`namespace { … }`）或作为 `private` 成员，不要污染公开命名空间。
 
 ---
@@ -296,7 +303,7 @@ enum class color : int32_t {
   * 全部是字面量 → `inline constexpr <type> NAME = …;`
   * 需要构造 / 分配（`[]`、`new Map()`、函数调用）→ `inline const <type> NAME = …;`（C++17 起 `inline` 变量跨 TU 唯一，不需要再写一个 `.cpp`）
   * 若目标仓库坚持「头文件只放声明」→ 改成 `.h` 里 `extern const <type> NAME;`、`.cpp` 里定义，此时该单元的 `.cpp` 一定被计划（`requires: "bodies"`），不要漏交。
-* `# const` 名字保留源文件的大小写，除非目标仓库的常量命名规范另有要求（§11）：`MAX_DEPTH` 就写 `MAX_DEPTH`，不要擅自改成 `kMaxDepth`。
+* `# const` 名字保留源文件的大小写，除非目标仓库的常量命名规范另有要求（§12）：`MAX_DEPTH` 就写 `MAX_DEPTH`，不要擅自改成 `kMaxDepth`。
 * `# enum`：
   * 一律 `enum class`（避免 `color::red` 与其它枚举的 `red` 撞名，也避免隐式转换）；显式写底层类型 `: int32_t`，没有 `- case … = <值>` 时从 0 开始递增。
   * `- case green = 2` 的右侧逐字直译：`green = 2,`；后面的 `blue` 若与某个显式值撞车（`green = 2` 与 `blue` 这种组合），**必须**给 `blue` 一个显式值并加注释说明，否则 C++ 里两个枚举值同值虽合法但语义含混。
@@ -379,7 +386,7 @@ std::generator<int32_t> tick() {
 }  // namespace demo
 ```
 
-C++17 或工具链没有 `<generator>` 时，用「惰性序列」替代，并保证语义等价（调用时才产生值、可多次迭代按 §11 决定）：
+C++17 或工具链没有 `<generator>` 时，用「惰性序列」替代，并保证语义等价（调用时才产生值、可多次迭代按 §12 决定）：
 
 ```cpp
 // 把 yield 序列搬进一个 std::vector 并在调用时返回（急切），
@@ -569,7 +576,7 @@ class box : public point, public printable {
 * 默认把数据成员设为 `private` + 读写器，是 C++ 侧与本项目惯例最一致的做法（也和 `ts` 产物里 `property` 展开成字段 + 访问器的形状接近）。
   * `readonly` 字段（`readonly field kind:"printable"`）→ 只给 `const` 读方法，不给 `set_`。
   * `private field` → 数据成员保持 `private`，并且**不生成**公开读写器；若 IR 里没有别的成员用到它，就是一个纯粹的内部状态字段。
-  * 目标仓库明确用「公开数据成员」风格（POD / `struct`）时，可以改成 `struct` 式公开字段 + 保持字段名不变：这是 §11 的取舍，但**不能**只保留 `x_` 而丢掉 `x` 这个名字——成员名集合是校验对象。
+  * 目标仓库明确用「公开数据成员」风格（POD / `struct`）时，可以改成 `struct` 式公开字段 + 保持字段名不变：这是 §12 的取舍，但**不能**只保留 `x_` 而丢掉 `x` 这个名字——成员名集合是校验对象。
 * `static` → `static` 成员；能被常量表达式折叠时优先 `static constexpr`（类内即可定义，C++17 起无需类外定义），否则在 `.cpp` 里补类外定义：`const std::string box::thing_ = …;`。
 * 初始值翻译：
   * `= []` → `= {};`（值初始化）
@@ -737,6 +744,7 @@ C++ 侧没有字节契约，目标是**可读且与源文件顺序一致**：
 * 只写声明、把定义放 `.cpp` 时，`.h` 里每个成员的声明都不能漏——这是最容易踩的一条。
 * 一个单元有 `.cpp` 时，**两个部件都要交**；少交一个是 `E4002`，多交计划外的路径是 `E2001`（`xl-cli.md` §3.4）。
 * 改完先 `xl_verify` 再 `xl_emit`：前者不写盘，成本低。
+* **`CMakeLists.txt` 不在这张表的任何一项里**：它不在计划的产物清单里，`xl_verify` / `xl_emit` 都不看它一眼。它的位置、内容与构建树隔离由 §11 的约定负责，不由 xl 校验。
 
 ---
 
@@ -864,11 +872,91 @@ class cache {
 #endif  // DEMO_CACHE_H
 ```
 
-（`demo_module.cpp` 只在模块级 `# method` / `# const` / `# statement` 需要时才出现；`# statement` 的处理见 §5.6。）
+（`demo_module.cpp` 只在模块级 `# method` / `# const` / `# statement` 需要时才出现；`# statement` 的处理见 §5.6。要能编译出东西，还需要一份 `<out>/cpp/CMakeLists.txt`，见 §11。）
 
 ---
 
-## 11. 覆盖段与既有实现的优先级
+## 11. 构建与产物布局
+
+**构建文件不在仓库根，就在生成树里**：`<out>/cpp/CMakeLists.txt`。它不由 `xl` 生成（`xl_plan` 里没有它、`xl_emit` 不校验它、`--clean` 不会删它，见 §1 的「构建文件」一行），而是**由你写、由你维护**：目标工程需要什么、编译标准是什么、要不要第三方依赖，都在这里落定。
+
+```text
+<repo>/                                    ← 仓库根永远干净：没有 CMakeLists.txt、没有 CMakeCache.txt、没有 CMakeFiles/
+  pkg/demo.xl.md                           ← 源
+  dist/                                    ← 整棵 gitignore
+    cpp/
+      CMakeLists.txt                       ← 你写的构建文件（常驻，xl 不碰）
+      pkg/point.h  pkg/point.cpp  …        ← xl 的产物（§1、§2）
+      build/                               ← 构建树：一切中间产物只准进这里
+      .xl/                                 ← xl 的增量 cache 与历史版本归档
+```
+
+### 11.1 `CMakeLists.txt`（放在 `<out>/cpp/`）
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(xl_generated CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 产物是 .h 与 .cpp，分布在按源目录层级展开的子目录里
+# 排除 .xl/：那里是 xl 的历史版本归档（同样的 .cpp 后缀），卷进来会重复定义符号
+file(GLOB_RECURSE GENERATED_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
+list(FILTER GENERATED_SOURCES EXCLUDE REGEX "/\\.xl/")
+
+add_library(xl_generated STATIC ${GENERATED_SOURCES})
+
+# 引入根 = 本目录（dist/cpp），与 §3.1 的 include 约定一致
+target_include_directories(xl_generated PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# 最终产物也收在构建树里；多配置 generator（Visual Studio 之类）会再加一层 <Config>/
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+```
+
+* 第三方依赖：xl 侧的 `## cpp` 段说需要什么（§3.2），在这里用 `find_package` + `target_link_libraries` 落实。宿主语言的能力（`fetch`、事件循环）没有 C++ 等价物时，不要假装它能链接——按 §5.5 改成明确失败并在此处注释说明。
+* **不要** `add_subdirectory` 到仓库里别的位置，也不要在模板里依赖 `CMAKE_SOURCE_DIR`（本模板只用 `CMAKE_CURRENT_SOURCE_DIR` 与 `CMAKE_BINARY_DIR`，两者都落在 `dist/cpp/` 之内）。
+* 第一次生成时 `dist/cpp` 里可能一个 `.cpp` 都没有（例如全部是 header-only 的 `# interface`）：`GLOB` 会得到空列表，`add_library` 因没有源文件而报错。这是**顺序问题不是配置问题**——先 `xl build . -t cpp`（或让会话走完 `xl_context` → `xl_emit`），再 configure；`CONFIGURE_DEPENDS` 会在后续新增产物时自动重新展开。
+* 需要多个库目标（例如「模块级声明」一个、每个类型一个）时，就多写几个 `add_library`，`GLOB` 表达式按目录或文件名收窄即可。
+
+### 11.2 配置与构建：只准在 `<out>/cpp/` 内
+
+```console
+$ xl build . -t cpp                    # 先生成产物，dist/cpp 才有 .h/.cpp
+$ cd dist/cpp                          # 进入生成树
+$ cmake -B build && cmake --build build
+```
+
+* **总是 `-B build`**（相对当前目录），构建树恒为 `<out>/cpp/build/`。
+* **绝不要**在仓库根或 `<out>/cpp/` 之外跑 cmake——`cmake .`、`cmake -S <repo> -B <repo>` 都会把构建树放到生成树之外，那正是要避免的。
+* 构建文件与产物**同处一棵树**时有个额外好处：`#include "…"` 这类相对路径与构建文件里写的 `CMAKE_CURRENT_SOURCE_DIR` 声明同源，不存在「从哪个目录跑」的分歧。**不要**把 `CMakeLists.txt` 放到仓库根或其它目录（`xl` 只管 `<out>/<lang>/`，树外的文件不在任何约定之内）。
+* 判据（比人眼可靠）：在仓库根跑 `git status --porcelain`，**输出应当为空**。有输出就说明有东西漏到 `dist/` 之外了（前提是 `dist/` 已 gitignore，见 §11.3）。
+
+### 11.3 不要提交生成树，也不要提交构建树
+
+* 仓库根加 `/dist/`（连同 `/node_modules/` 之类）；构建文件若希望随仓库走，就在生成树里单独放行：根忽略 `dist/`，再加 `!dist/cpp/CMakeLists.txt`。
+* 提交 `CMakeCache.txt` 会把**你这台机器的绝对路径与工具链探测结果**一起写进历史，还会让下一次 cmake 复用错误配置。
+* 单纯 gitignore 而不真正隔离，等于把污染藏起来——判据仍然是 §11.2 的 `git status` 为空。
+
+### 11.4 这些文件属于谁：常驻、不归 `xl` 管
+
+| 文件 / 目录 | 谁写 | `xl build` 会不会动它 | 归不归 `xl` 管 |
+| --- | --- | --- | --- |
+| `dist/cpp/pkg/*.h`、`*.cpp` | 你（经 `xl_emit`） | 会（这就是它的计划产物，`--clean` 会删、`--force` 会覆盖） | 是 |
+| `dist/cpp/CMakeLists.txt` | 你（手写或会话里生成一次） | **不会**：它不在 `plan.outputs` 里，所以既不覆盖也不删除 | 否（但请留在 `dist/cpp/`，别上交到仓库根） |
+| `dist/cpp/build/**`（含 `CMakeCache.txt`、`CMakeFiles/`、`*.o`） | cmake | 不会（`--clean` 只删计划产物，不做目录级删除） | 否 |
+| `dist/cpp/.xl/**`（`cache.json` 与历史版本） | `xl` | 会（读 / 写 / 归档） | 是 |
+
+* `xl-cli.md` 的 `E2001` 只保护「`xl` 要写的路径不被非产物文件占用」，**不保护**「`dist/` 之外没被写过」：这条约束靠上面三条约定，不靠 `xl` 校验。真要当门禁，就在 CI 里跑一次 §11.2 的 `git status` 判据。
+* **`--clean` 是安全的**：它只对 `plan.outputs` 里的路径做归档 + 删除，不会 `rm -rf dist`，所以 `CMakeLists.txt` 与 `build/` 都不受影响。
+
+---
+
+## 12. 覆盖段与既有实现的优先级
 
 从高到低（四条规则都只决定**取舍与风格**，不能违反 §9 的结构回读）：
 
@@ -886,11 +974,11 @@ class cache {
 
 ---
 
-## 12. 常见错误
+## 13. 常见错误
 
 | 现象 | 后果 | 正确做法 |
 | --- | --- | --- |
-| 把 `ts` 默认代码块逐字抄进 `.cpp` | 不编译 | 它只是行为说明，必须译成 C++（§11） |
+| 把 `ts` 默认代码块逐字抄进 `.cpp` | 不编译 | 它只是行为说明，必须译成 C++（§12） |
 | 模板成员的定义放进 `.cpp` | 链接失败 | 模板定义留在 `.h`（§4.1） |
 | 成员名只写成 `x_`，`.h` 里没有 `x` / `set_x` | `E4002` 结构回读失败 | 读写器用不带后缀的名字（§9） |
 | 漏交 `.cpp`（或漏交 `.h`） | `E4002`，且一个文件都不写 | 按 `xl_context` 的部件清单逐一交（§1、§9） |
@@ -903,10 +991,15 @@ class cache {
 | `# statement` 依赖其它 TU 的全局对象初始化顺序 | 静态初始化顺序问题 | 改成函数内 `static` 或显式初始化入口（§5.6） |
 | 伪造宿主语言才有的能力（`fetch`…） | 运行时静默错误 | 明确失败或向调用方说明（§5.5） |
 | 在产物里写 `@generated` 头 / 时间戳 | 与 `xl_emit` 追加的头冲突、破坏可复现性 | 只交纯代码，头交给 `xl_emit`（§1） |
+| 把 `CMakeLists.txt` 放在仓库根 | 仓库根被污染；xl 的布局约定（`<out>/<lang>/`）只覆盖生成树 | 放 `<out>/cpp/CMakeLists.txt`（§11.1） |
+| 从仓库根跑 `cmake .` / `cmake -S . -B <repo>` | 仓库根长出 `CMakeCache.txt`、`CMakeFiles/`、`Makefile`/`build.ninja`；`CMakeCache.txt` 里写满本机绝对路径，还会让后续 cmake 复用错误配置 | `cd dist/cpp && cmake -B build`（§11.2） |
+| 构建树没 gitignore，或 gitignore 了却没真隔离 | 生成树 / 构建树被提交，`git status` 一片红 | `.gitignore` 忽略 `/dist/` + 用 `git status --porcelain` 当判据（§11.2、§11.3） |
+| `GLOB` 把 `.xl/` 里的历史版本归档一起收进构建 | 同一个符号定义两次，链接期重复定义 | `list(FILTER … EXCLUDE REGEX "/\\.xl/")`（§11.1） |
+| 产物还没生成就先 configure | `add_library` 收到空源列表而报错（顺序问题） | 先 `xl build . -t cpp` 或走完 `xl_context` → `xl_emit`（§11.1） |
 
 ---
 
-## 13. 与 ts 直出的对照（速查）
+## 14. 与 ts 直出的对照（速查）
 
 | 构念 | ts 直出（`xl-emit-ts.md`） | C++（本文） |
 | --- | --- | --- |
@@ -922,10 +1015,12 @@ class cache {
 | `# type` 右侧 | 逐字保留 | 按意图选 `using` / `enum class` / `struct`（§5.2） |
 | `# statement` | 成为产物里的一个段落 | 匿名初始化对象（§5.6） |
 | 说明散文 | 不进产物 | 不进产物（可选写成 `//` 注释，§2.1 规则 6） |
+| 构建文件与编译 | 不需要（ts 由 `tsc` / 运行时直接吃） | `<out>/cpp/CMakeLists.txt` 由生成者写；构建树只准在 `<out>/cpp/build/`（§11） |
+| `#include` 路径 | 不适用 | 相对 `<out>/cpp/` 的产物路径，**与命名空间无关**（§3.1） |
 
 ---
 
-## 14. 一页速记
+## 15. 一页速记
 
 ```text
 1  路径逐字用 xl_context；.h 必交，.cpp 只在计划里有它时才交
@@ -946,4 +1041,7 @@ class cache {
 8  模板成员定义留在 .h；.cpp 里写非模板成员的类外定义
 9  #statement→匿名初始化对象；多段按源顺序，跨 TU 顺序不做保证
 10 提交前先 xl_verify：.h 提到每个成员名、参数个数一致、只交计划内的路径
+11 构建文件 <out>/cpp/CMakeLists.txt 由你写（xl 不计划、不校验、不删）；
+   include 路径相对 <out>/cpp/；构建只准 cd dist/cpp && cmake -B build；
+   仓库根不许出现 CMakeLists.txt / CMakeCache.txt / CMakeFiles/；/dist/ 进 .gitignore
 ```
