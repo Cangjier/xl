@@ -4,7 +4,7 @@
 
 ## 0. 规范文档在哪里
 
-`docs/` 下的六份文档是**本实现的事实来源**，随本仓库一起发布：
+`docs/` 下的七份文档是**本实现的事实来源**，随本仓库一起发布：
 
 | 文件 | 内容 |
 | --- | --- |
@@ -12,6 +12,7 @@
 | [`xl-cli.md`](./xl-cli.md) | 命令行接口、两条通道、`xl.json`、退出码 |
 | [`xl-check.md`](./xl-check.md) | 诊断码表（级别的唯一事实来源） |
 | [`xl-emit-ts.md`](./xl-emit-ts.md) | ts 直出通道的产物映射 |
+| [`xl-emit-cpp.md`](./xl-emit-cpp.md) | **C++ 生成指南（推荐，非规范）**：计划通道生成 C++ 时的默认约定；`xl` 不校验它，改它不影响任何代码 |
 | [`xl-base-case.md`](./xl-base-case.md) | 验收基准：完整输入与逐字节期望产物 |
 | `design.md` | 本文：面向维护者的设计说明 |
 
@@ -25,7 +26,7 @@ pnpm fixtures    # 从 docs/xl-base-case.md 重新抽取验收 fixture
 pnpm codes       # 码表里每个码都要有产生它的地方
 ```
 
-**`xl-base-case.md` 例外，它是冻结的**：验收 fixture 由它生成，因此只在你确实要改字节契约时才动它；改完必须跑 `pnpm fixtures` 并提交重抽后的 `tests/fixtures/*`。`docs/xl-*.md` 曾经是上游 xlanguage 仓库规范的**逐字副本**（用 `pnpm docs:sync` 比对），该机制已取消：文档现在就是本仓库的规范，不再逐字跟随别处。
+**`xl-base-case.md` 例外，它是冻结的**：验收 fixture 由它生成，因此只在你确实要改字节契约时才动它；改完必须跑 `pnpm fixtures` 并提交重抽后的 `tests/fixtures/*`。`xl-emit-cpp.md` 是第二类例外：它是给计划通道生成者的**推荐指南**，没有对应的实现代码，`xl` 也不校验它，所以改它只需自洽，不必同步任何代码（生成者可以按目标仓库的规范偏离它，见该文开头）。`docs/xl-*.md` 曾经是上游 xlanguage 仓库规范的**逐字副本**（用 `pnpm docs:sync` 比对），该机制已取消：文档现在就是本仓库的规范，不再逐字跟随别处。
 
 ---
 
