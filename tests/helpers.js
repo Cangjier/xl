@@ -1,7 +1,7 @@
 /**
  * Shared test helpers: throwaway workspaces and a minimal Cordis context.
  *
- * @module dsh-xl/tests/helpers
+ * @module xl/tests/helpers
  */
 
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -16,7 +16,7 @@ import { toPosix } from '../src/core/text.js'
  * @returns {string} the workspace root.
  */
 export function makeWorkspace(files) {
-  const root = mkdtempSync(join(tmpdir(), 'dsh-xl-'))
+  const root = mkdtempSync(join(tmpdir(), 'xl-'))
   writeFiles(root, files)
   return root
 }

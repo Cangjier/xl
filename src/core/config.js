@@ -4,7 +4,7 @@
  * The precedence everywhere is **CLI argument > environment variable >
  * `xl.json` > built-in default** (xl-cli §3.1, §5).
  *
- * @module dsh-xl/core/config
+ * @module xl/core/config
  */
 
 import { existsSync, readFileSync } from 'node:fs'

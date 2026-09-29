@@ -11,7 +11,7 @@
  * `xl_verify`, `xl_check`, and `xl_build` are the remaining standardized
  * operations, exposed one per operation rather than one per option.
  *
- * @module dsh-xl/plugin/tools
+ * @module xl/plugin/tools
  */
 
 /** Name of every tool this plugin registers. */

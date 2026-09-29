@@ -11,7 +11,7 @@
  *   node scripts/extract-fixtures.mjs
  *   node scripts/extract-fixtures.mjs ../xlanguage/docs/xl-base-case.md
  *
- * @module dsh-xl/scripts/extract-fixtures
+ * @module xl/scripts/extract-fixtures
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'

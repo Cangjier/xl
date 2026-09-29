@@ -5,7 +5,7 @@
  * recursively while leaving unknown names and literal types untouched.
  * `# type` right-hand sides never reach this module: they are verbatim.
  *
- * @module dsh-xl/core/types
+ * @module xl/core/types
  */
 
 import { indexTopLevel, matchPair, splitTopLevel } from './text.js'

@@ -1,7 +1,7 @@
 /**
  * TypeScript printer tests: the mapping rules the base case does not pin.
  *
- * @module dsh-xl/tests/emit-ts
+ * @module xl/tests/emit-ts
  */
 
 import assert from 'node:assert/strict'

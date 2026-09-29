@@ -2,7 +2,7 @@
  * Console output for the `xl` profile: the human-readable and NDJSON event
  * renderings of check, plan, and build results (xl-cli §3.7, xl-check §2).
  *
- * @module dsh-xl/plugin/console
+ * @module xl/plugin/console
  */
 
 /**

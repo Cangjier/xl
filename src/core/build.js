@@ -10,7 +10,7 @@
  *   previous version; the generation itself is done by a DSH agent that calls
  *   the `xl_*` tools. No subprocess and no model call happens here.
  *
- * @module dsh-xl/core/build
+ * @module xl/core/build
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'

@@ -7,7 +7,7 @@
  * cross-file references are recorded as raw import records and resolved by the
  * checker, which owns the file port.
  *
- * @module dsh-xl/core/parse
+ * @module xl/core/parse
  */
 
 import { diag } from './diagnostics.js'

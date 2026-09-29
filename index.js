@@ -1,8 +1,8 @@
 /**
- * The dsh-xl bundle entry point: the `xl` Host service and its model-facing
+ * The xl bundle entry point: the `xl` Host service and its model-facing
  * `xl_*` tools.
  *
- * @module dsh-xl
+ * @module xl
  */
 
 export { XL_SERVICE, apply, inject, name, normalizeConfig } from './src/plugin/index.js'

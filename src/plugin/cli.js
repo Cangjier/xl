@@ -6,7 +6,7 @@
  * It is disabled outside the profile named `xl` by the bundle patch, because a
  * profile's command line is parsed by exactly one application plugin.
  *
- * @module dsh-xl/plugin/cli
+ * @module xl/plugin/cli
  */
 
 import { readFileSync } from 'node:fs'

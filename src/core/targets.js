@@ -3,7 +3,7 @@
  * what extension and layout they use, and how a type name becomes a file name
  * (xl-cli §3.3, §3.5).
  *
- * @module dsh-xl/core/targets
+ * @module xl/core/targets
  */
 
 import { commentMarkerFor } from './parse.js'

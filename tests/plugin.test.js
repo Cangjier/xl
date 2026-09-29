@@ -2,7 +2,7 @@
  * Plugin tests: the service is published, the tools are registered, and the
  * tool surface round-trips the plan channel.
  *
- * @module dsh-xl/tests/plugin
+ * @module xl/tests/plugin
  */
 
 import assert from 'node:assert/strict'

@@ -2,7 +2,7 @@
  * Plan-channel tests: the generation context, structural verification, and the
  * artifact write with its header, archive, and cache record.
  *
- * @module dsh-xl/tests/artifact
+ * @module xl/tests/artifact
  */
 
 import assert from 'node:assert/strict'

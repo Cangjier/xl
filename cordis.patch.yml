@@ -1,4 +1,4 @@
-# The dsh-xl bundle patch.
+# The xl bundle patch.
 #
 # It contributes two rows and depends on nothing but the composition it is
 # installed into:
@@ -14,7 +14,7 @@
 
 - insert:
     - id: xl
-      name: 'dsh-xl'
+      name: 'xl'
       config:
         workspaceRoot: null
         cacheDir: '.xl'
@@ -22,5 +22,5 @@
         verifyOnEmit: true
 
     - id: xl-cli
-      name: 'dsh-xl/cli'
+      name: 'xl/cli'
       disabled: !!js "ctx.get('profileContext')?.name !== 'xl'"

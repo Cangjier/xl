@@ -10,7 +10,7 @@
  *   version is what the non-ts channel offers as "the implementation to build
  *   on", so a different version is a different generation input.
  *
- * @module dsh-xl/core/cache
+ * @module xl/core/cache
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'

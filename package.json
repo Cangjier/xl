@@ -1,5 +1,5 @@
 {
-  "name": "dsh-xl",
+  "name": "xl",
   "version": "0.1.0",
   "private": true,
   "description": "xl-md (*.xl.md) compiler for DeepSeek Harness: the xl command line, an xl Host service, and model-facing xl_* tools.",

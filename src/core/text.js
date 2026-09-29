@@ -2,7 +2,7 @@
  * Text, hashing, identifier, and code-block primitives shared by the parser,
  * the checker, and the ts printer. Every function here is pure.
  *
- * @module dsh-xl/core/text
+ * @module xl/core/text
  */
 
 import { createHash } from 'node:crypto'

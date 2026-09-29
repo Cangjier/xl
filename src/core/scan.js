@@ -2,7 +2,7 @@
  * Input discovery: files, directories, and globs into the sorted, deduplicated
  * `*.xl.md` input list (xl-cli §3.2).
  *
- * @module dsh-xl/core/scan
+ * @module xl/core/scan
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'

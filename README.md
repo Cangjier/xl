@@ -1,4 +1,4 @@
-# dsh-xl
+# xl
 
 把 **xl-md 编译器**装进 DeepSeek Harness 的插件（bundle）。
 
@@ -49,7 +49,7 @@
 在 Web 会话里用 `plugin_manager`，或者命令行：
 
 ```sh
-dsh plugin --profile web add C:\Users\Admin\Documents\GitHub\dsh-xl
+dsh plugin --profile web add C:\Users\Admin\Documents\GitHub\xl
 ```
 
 装完刷新页面，`xl_plan` 等七个工具即可用。这一步只注册 Host 插件与工具，不解析 profile 的命令行。
@@ -57,7 +57,7 @@ dsh plugin --profile web add C:\Users\Admin\Documents\GitHub\dsh-xl
 ### 2.2 新建 `xl` profile（拿到 CLI）
 
 ```sh
-dsh plugin --profile xl add C:\Users\Admin\Documents\GitHub\dsh-xl
+dsh plugin --profile xl add C:\Users\Admin\Documents\GitHub\xl
 ```
 
 `dsh plugin` 会初始化一个 base-backed profile 并选中本 bundle。之后：
@@ -70,12 +70,12 @@ dsh xl targets
 
 `xl` 是一个 profile 名，所以 `dsh xl …` 就是 `dsh --profile xl …`。这是 dsh 唯一支持的应用入口写法：launcher 级子命令表是硬编码的（只有 `plugin`），profile 名是插件唯一能占用的「命令」。
 
-> 应用行 `dsh-xl/cli` 只在 profile 名恰为 `xl` 时启用（bundle patch 里的 `disabled: !!js "ctx.get('profileContext')?.name !== 'xl'"`）。原因是一个 profile 的命令行只能由一个应用插件解析：Web profile 已经用它解析 `dsh web --port`，headless profile 用它解析任务文本。
+> 应用行 `xl/cli` 只在 profile 名恰为 `xl` 时启用（bundle patch 里的 `disabled: !!js "ctx.get('profileContext')?.name !== 'xl'"`）。原因是一个 profile 的命令行只能由一个应用插件解析：Web profile 已经用它解析 `dsh web --port`，headless profile 用它解析任务文本。
 
 ### 2.3 卸载
 
 ```sh
-dsh plugin --profile web remove dsh-xl
+dsh plugin --profile web remove xl
 ```
 
 ---
@@ -176,7 +176,7 @@ xl --version | -v                版本
 
 ```yaml
 - id: xl
-  name: 'dsh-xl'
+  name: 'xl'
   config:
     workspaceRoot: null      # 工具缺省的工作目录；null 用进程 cwd
     cacheDir: '.xl'          # cache 根目录；xl.json 与 XL_CACHE_DIR 优先级更高

@@ -6,7 +6,7 @@
  * filesystem work in `build`, `scan`, `cache`, and `source`, which the Host
  * plugin calls on behalf of an agent.
  *
- * @module dsh-xl/core
+ * @module xl/core
  */
 
 export { BuildCache } from './cache.js'

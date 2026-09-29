@@ -8,7 +8,7 @@
  * target-language segment in front of it and emits one file per type plus one
  * module file for the module-level declarations.
  *
- * @module dsh-xl/core/plan
+ * @module xl/core/plan
  */
 
 import { LAYOUT_TYPE, MODULE_FILE_SUFFIX, typeFileBaseName } from './targets.js'

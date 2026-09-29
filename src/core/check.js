@@ -6,7 +6,7 @@
  * heading. This module adds the cross-member and cross-file rules, and the
  * generation-quality warnings that depend on the requested target languages.
  *
- * @module dsh-xl/core/check
+ * @module xl/core/check
  */
 
 import { diag } from './diagnostics.js'

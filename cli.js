@@ -2,7 +2,7 @@
  * The `xl` application row entry point. The bundle patch mounts this subpath
  * only in the profile named `xl`.
  *
- * @module dsh-xl/cli
+ * @module xl/cli
  */
 
 export { apply, inject, internals, name } from './src/plugin/cli.js'

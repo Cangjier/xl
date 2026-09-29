@@ -2,7 +2,7 @@
  * `xl` command-line tests: argument parsing and a full invocation through the
  * application row.
  *
- * @module dsh-xl/tests/cli
+ * @module xl/tests/cli
  */
 
 import assert from 'node:assert/strict'

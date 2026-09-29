@@ -7,7 +7,7 @@
  * verifies the type set, the member set, and parameter counts, and leaves code
  * correctness to the target language's own compiler.
  *
- * @module dsh-xl/core/verify
+ * @module xl/core/verify
  */
 
 import { mapType } from './types.js'

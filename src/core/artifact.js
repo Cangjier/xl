@@ -14,7 +14,7 @@
  *    path with the xl header and fingerprint, archive the version it replaced,
  *    and record the result in the cache.
  *
- * @module dsh-xl/core/artifact
+ * @module xl/core/artifact
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

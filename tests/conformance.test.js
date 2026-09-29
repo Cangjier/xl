@@ -6,7 +6,7 @@
  * acceptance standard for the ts channel. The printer must reproduce the
  * expected body byte for byte.
  *
- * @module dsh-xl/tests/conformance
+ * @module xl/tests/conformance
  */
 
 import assert from 'node:assert/strict'

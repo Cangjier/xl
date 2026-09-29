@@ -6,7 +6,7 @@
  * separator. These are regression tests for the bug that made a parameter list
  * containing a function-typed parameter unsplittable (`E1204`).
  *
- * @module dsh-xl/tests/text
+ * @module xl/tests/text
  */
 
 import assert from 'node:assert/strict'

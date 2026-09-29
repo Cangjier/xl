@@ -6,7 +6,7 @@
  * the `xl` command line is another; neither reimplements planning, the cache,
  * or the artifact contract.
  *
- * @module dsh-xl/plugin/service
+ * @module xl/plugin/service
  */
 
 import { resolve } from 'node:path'

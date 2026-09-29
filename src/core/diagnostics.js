@@ -7,7 +7,7 @@
  * segment are warnings (`E1105`, `E1107`, `E2003`). Every severity decision
  * reads this table, never the prefix.
  *
- * @module dsh-xl/core/diagnostics
+ * @module xl/core/diagnostics
  */
 
 /** @typedef {'error' | 'warning'} Severity */

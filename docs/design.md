@@ -1,4 +1,4 @@
-# dsh-xl 设计说明
+# xl 设计说明
 
 > 面向维护者。用户向的安装与用法见 [`../README.md`](../README.md)。
 
@@ -71,7 +71,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 
 ### 2.2 能力缝
 
-`xl` 服务是 Service Definition，`dsh-xl` 插件是 Service Provider，消费者有两个：七个模型工具，以及 `xl` profile 的应用行。两者都不重新实现计划、cache 或产物契约——CLI 的 `xl build` 与工具的 `xl_build` 调的是同一个 `runBuild`。
+`xl` 服务是 Service Definition，`xl` 插件是 Service Provider，消费者有两个：七个模型工具，以及 `xl` profile 的应用行。两者都不重新实现计划、cache 或产物契约——CLI 的 `xl build` 与工具的 `xl_build` 调的是同一个 `runBuild`。
 
 服务方法把「请求」翻译成 core 的参数，这是唯一有判断的地方：CLI 选项、环境变量、`xl.json` 的优先级在 `resolveBuildOptions` 里统一收口，工具与 CLI 都只提供自己那一层的覆盖值。
 

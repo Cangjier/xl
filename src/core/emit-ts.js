@@ -6,7 +6,7 @@
  * The acceptance standard is `docs/xl-base-case.md`: the printer's output for
  * that input must equal the documented artifact byte for byte.
  *
- * @module dsh-xl/core/emit-ts
+ * @module xl/core/emit-ts
  */
 
 import { INDENT, bodyHasYield, normalizeCode } from './text.js'

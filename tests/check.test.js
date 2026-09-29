@@ -2,7 +2,7 @@
  * Checker tests: the rules that need the whole document or the dependency
  * index, and the generation-quality warnings that depend on target languages.
  *
- * @module dsh-xl/tests/check
+ * @module xl/tests/check
  */
 
 import assert from 'node:assert/strict'

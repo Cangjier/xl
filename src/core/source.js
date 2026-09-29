@@ -2,7 +2,7 @@
  * Source loading and the `E0005` encoding contract: `*.xl.md` is UTF-8 without
  * a BOM and uses LF.
  *
- * @module dsh-xl/core/source
+ * @module xl/core/source
  */
 
 import { readFileSync } from 'node:fs'

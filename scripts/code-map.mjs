@@ -8,7 +8,7 @@
  *
  *   node scripts/code-map.mjs
  *
- * @module dsh-xl/scripts/code-map
+ * @module xl/scripts/code-map
  */
 
 import { readFileSync } from 'node:fs'

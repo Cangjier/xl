@@ -1,7 +1,7 @@
 /**
  * Output-planning tests: layout, extensions, naming, and conflicts.
  *
- * @module dsh-xl/tests/plan
+ * @module xl/tests/plan
  */
 
 import assert from 'node:assert/strict'

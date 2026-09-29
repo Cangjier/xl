@@ -15,7 +15,7 @@
  * absent (a checkout without the sibling repository is not a failure), and 1
  * when a vendored file differs from, or is missing from, the upstream copy.
  *
- * @module dsh-xl/scripts/verify-docs-sync
+ * @module xl/scripts/verify-docs-sync
  */
 
 import { createHash } from 'node:crypto'

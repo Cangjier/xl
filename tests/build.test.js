@@ -2,7 +2,7 @@
  * Build tests: the ts channel writes, the plan channel does not, and the cache
  * and conflict rules hold.
  *
- * @module dsh-xl/tests/build
+ * @module xl/tests/build
  */
 
 import assert from 'node:assert/strict'

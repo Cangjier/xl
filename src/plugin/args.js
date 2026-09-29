@@ -5,7 +5,7 @@
  * because this package must stay dependency-free to remain installable into a
  * profile without a build or install step.
  *
- * @module dsh-xl/plugin/args
+ * @module xl/plugin/args
  */
 
 /** Version reported by `-v` / `--version`. */

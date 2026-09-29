@@ -6,7 +6,7 @@
  * The header is the only contract between two xl runs, so its byte form
  * matters: three comment-prefixed lines, then one blank line, then the body.
  *
- * @module dsh-xl/core/header
+ * @module xl/core/header
  */
 
 import { HEADER_MARK, normalizeNewlines, sha256 } from './text.js'

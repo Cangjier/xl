@@ -1,7 +1,7 @@
 /**
  * Parser tests: IR construction and the syntax / structure diagnostics.
  *
- * @module dsh-xl/tests/parse
+ * @module xl/tests/parse
  */
 
 import assert from 'node:assert/strict'

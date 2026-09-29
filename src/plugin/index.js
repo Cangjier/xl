@@ -6,7 +6,7 @@
  * profile can install it without a build step and without a dependency edge on
  * the harness packages it composes with.
  *
- * @module dsh-xl/plugin
+ * @module xl/plugin
  */
 
 import { createXlService } from './service.js'
