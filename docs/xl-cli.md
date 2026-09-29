@@ -170,12 +170,14 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 | 工具 | 作用 |
 | --- | --- |
 | `xl_plan` | 列出源与每个「源 × 目标」的计划产物、复用判定（与 `xl build -t <其它语言>` 看到的是同一份计划数据） |
-| `xl_context` | 一份「源 × 目标」的完整生成依据：契约（结构摘要 + 输出路径 + 部件 + `layout`）、`promptHash`、该源与依赖的目标语言覆盖段、上一版产物 |
+| `xl_context` | 一份「源 × 目标」的完整生成依据：契约（结构摘要 + 输出路径 + 部件 + `layout`）、`promptHash`、该源与依赖的目标语言覆盖段、上一版产物，以及该目标语言的生成指南路径（`docs/xl-emit-<lang>.md`，存在时才给） |
 | `xl_cache` | 该「源 × 目标」的缓存状态：是否 reusable、源指纹、`promptHash`、上一版（按部件扩展名给） |
 | `xl_verify` | 不写盘地校验候选产物（结构回读） |
 | `xl_emit` | 校验并写盘：加产物头与指纹、归档被覆盖的那一版、更新 cache；漏产物 / 多产物 / 结构不符一律拒绝且不写盘 |
 | `xl_check` | 与 `xl check` 同一个检查器 |
 | `xl_build` | 与 `xl build` 同一个构建器（ts 写盘，其余只给计划） |
+
+**生成指南**：`xl_context` 的 `## Next` 里会给出该目标语言的指南路径——本仓库 `docs/xl-emit-<lang>.md`（`cpp` 是 [`xl-emit-cpp.md`](./xl-emit-cpp.md)，`ts` 直出通道的映射是 [`xl-emit-ts.md`](./xl-emit-ts.md)）。插件里**存在**该文件时才给路径；不存在时明确回一句「没有该目标的指南」，不会指向一个不存在的文件。指南是**建议性文档**：它不进 `promptHash`（§3.4），不进结构回读，改它不会让任何产物失效，也不能违反「契约与目标工程惯例优先」。
 
 **输出契约**（写进 `xl_context`，并由 `xl_emit` 的结构回读强制）：
 

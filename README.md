@@ -87,7 +87,7 @@ dsh plugin --profile web remove xl
 | 工具 | 作用 | 关键参数 |
 | --- | --- | --- |
 | `xl_plan` | 列出每个源 × 目标会产出哪些文件、走哪条通道、cache 是否已满足 | `paths?` `targets?` `out?` `naming?` `flat?` `cwd?` |
-| `xl_context` | 一个源 × 目标的标准化生成上下文：要写的确切路径（每个部件一条）、结构契约、语言覆盖段、每个部件的上一版指针 | `file` `target` `out?` `naming?` `flat?` `cwd?` |
+| `xl_context` | 一个源 × 目标的标准化生成上下文：要写的确切路径（每个部件一条）、结构契约、语言覆盖段、每个部件的上一版指针，以及该目标语言的**生成指南路径**（存在时） | `file` `target` `out?` `naming?` `flat?` `cwd?` |
 | `xl_cache` | 缓存状态：产物是否已匹配源指纹，以及每个部件最近归档的旧版本全文 | `file` `target` `out?` `cwd?` |
 | `xl_verify` | 只校验不写盘：类型集合、成员名、参数个数 | `file` `target` `files` `cwd?` |
 | `xl_emit` | 校验并写盘：产物头、指纹、prompt hash、归档旧版、更新 cache | `file` `target` `files` `model?` `force?` `verify?` `cwd?` |
@@ -100,11 +100,13 @@ dsh plugin --profile web remove xl
 
 ```text
 xl_plan      → 有哪些源、每个源要产出哪些文件、cache 是否 reusable
-xl_context   → 这一份源 × 目标的契约：输出路径（每个部件一条）+ 结构摘要 + ## <lang> 段 + 每个部件的上一版指针
-（agent 自己读 *.xl.md、需求文档、依赖文件）
+xl_context   → 这一份源 × 目标的契约：输出路径（每个部件一条）+ 结构摘要 + ## <lang> 段 + 每个部件的上一版指针 + 生成指南路径
+（agent 自己读 *.xl.md、需求文档、依赖文件，以及 xl_context 报出的生成指南）
 xl_cache     → 有上一版就取全文，在它之上改而不是重写
 xl_emit      → 一次提交这一份源 × 目标的全部文件；xl 负责校验、头、指纹、归档、cache
 ```
+
+**生成指南**：`xl_context` 会在 `## Next` 里给出该目标语言的指南路径（本仓库 `docs/xl-emit-<lang>.md`），存在才给——插件里没有对应指南的目标（今天的非 cpp 目标）会明确回一句「没有指南」，agent 就只依据契约与目标工程惯例。指南是**建议**，不是契约：它不进 `promptHash`，改指南不会让任何产物失效（[docs/design.md](docs/design.md) §4）。
 
 `xl_emit` 的 `files` 必须逐一对应 `xl_plan`/`xl_context` 报出的路径：给出计划外的路径会被拒（`E2001`），漏掉计划内的路径会被拒（`E4002`），产物结构与 IR 不一致会被拒（`E4002`）且**不写盘**，agent 改完再调一次即可。
 

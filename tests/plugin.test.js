@@ -160,6 +160,56 @@ test('xl_context reports the contract, the language sections, and the next steps
   }
 })
 
+test('xl_context points at the bundled guide of a target that has one', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': CPP_DEMO })
+  try {
+    const fake = mount(cwd)
+    // The alias resolves to the same guide: `c++` is the canonical `cpp`.
+    for (const target of ['cpp', 'c++']) {
+      const { text, value } = await callTool(fake.tools, 'xl_context', { file: 'demo.xl.md', target, cwd })
+      assert.equal(value.guide.name, 'xl-emit-cpp.md')
+      assert.equal(value.guide.exists, true)
+      assert.ok(existsSync(value.guide.path), `${value.guide.path} must exist`)
+      assert.ok(text.includes(value.guide.path))
+      assert.ok(text.includes('generation guide'))
+    }
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl_context says so when the target has no bundled guide, and still numbers the steps', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const fake = mount(cwd)
+    const { text, value } = await callTool(fake.tools, 'xl_context', { file: 'demo.xl.md', target: 'csharp', cwd })
+    assert.equal(value.guide.name, 'xl-emit-csharp.md')
+    assert.equal(value.guide.exists, false)
+    assert.ok(!text.includes(value.guide.path), 'a guide that does not exist is not pointed at')
+    assert.ok(text.includes('No bundled generation guide for csharp'))
+    // The disclaimer still occupies a step, so the numbering stays contiguous.
+    assert.ok(text.includes('1. Read the source'))
+    assert.ok(text.includes('2. No bundled generation guide for csharp'))
+    assert.ok(text.includes('3. Call `xl_cache`'))
+    assert.ok(text.includes('4. Call `xl_emit`'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('a workspace guide is found when the plugin ships none for that target', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO, 'docs/xl-emit-csharp.md': '# C# guide\n' })
+  try {
+    const fake = mount(cwd)
+    const { text, value } = await callTool(fake.tools, 'xl_context', { file: 'demo.xl.md', target: 'csharp', cwd })
+    assert.equal(value.guide.exists, true)
+    assert.equal(value.guide.path, join(cwd, 'docs/xl-emit-csharp.md'))
+    assert.ok(text.includes(value.guide.path))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
 test('xl_cache reports no previous version before the first emit', async () => {
   const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
   try {

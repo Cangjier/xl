@@ -114,6 +114,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 定义部件（C++ `.cpp`）只校验它提到的成员，声明部件必须提到全部成员 | `verify.js` `verifyStructure` 的 `scope` | `tests/artifact.test.js` |
 | `# statement` 段逐字节进入 ts 产物，且不参与导出与结构校验 | `emit-ts.js` `renderStatement`、`parse.js` `exportedNamesOf`、`verify.js` `verifyStructure` | `tests/conformance.test.js`、`tests/emit-ts.test.js` |
 | 不挂访问器的 `property` 等价于一对空访问器（读写直通），且不触发 `W3010` | `parse.js` `collectMemberChildren`（合成并打 `synthesized` 标记）、`emit-ts.js` `renderProperty`、`check.js` `checkTargetHints` | `tests/parse.test.js`、`tests/emit-ts.test.js` |
+| `xl_context` 报出的目标语言生成指南存在才给路径，且不进 `promptHash` | `tools.js` `resolveGuide` / `renderContext`（纯渲染，`existsSync` 留在 plugin 层） | `tests/plugin.test.js` |
 | interface 的 `property` 是属性签名：有 `set` 才可变，只有 `get` 时产物是 `readonly` | `emit-ts.js` `renderInterfaceMember` | `tests/emit-ts.test.js` |
 | 声明之间没有顺序要求，只有 `# dependencies` 必须最前、`# namespace` 至多一次 | `parse.js` `parseXlMd` | `tests/parse.test.js` |
 | 码表里每个码都有产生它的地方 | `scripts/code-map.mjs` | `pnpm run codes` |
@@ -170,6 +171,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 加一个多文件语言（如 C++ 的头/源） | `src/core/targets.js` 的 `BUILTIN_TARGETS.<lang>.parts`，或在 `targets.<lang>.parts` 里声明部件表：`requires: "bodies"` 让定义部件只在单元有可执行内容时出现，`scope: "definition"` 让结构回读只校验该部件提到的成员。计划、cache、产物头、工具渲染都按 `parts` 自动展开，不需要改其它模块 |
 | 改 ts 打印规则 | `src/core/emit-ts.js`，同时更新 `tests/emit-ts.test.js` 与基准样例的一致性测试 |
 | 加一条诊断码 | `src/core/diagnostics.js` 的 `DIAG_CODES`，在产生它的那一层 emit，补 `tests/parse.test.js` 或 `tests/check.test.js`，再跑 `pnpm run codes` |
+| 给某个目标语言写/改生成指南 | 在 `docs/` 下加 `xl-emit-<lang>.md`（例如 `xl-emit-cpp.md`）：`xl_context` 会**检测该文件是否存在**并把它报给 agent，存在才报路径。指南是建议性文档，不进 `promptHash`，因此改它不会让任何产物失效；它也没有对应的实现代码，只需要自洽 |
 | 让生成者拿到更多上下文 | `src/core/build.js` 的 `languageContext` 与 `src/core/artifact.js` 的 `contextFor`（注意 `promptHash` 的输入要同步，否则 cache 失效判定会失真） |
 | 换掉写盘实现（例如走 `ctx.fs` 沙箱） | `src/core/build.js` 的 `processPlan` 与 `src/core/artifact.js` 的 `emitArtifacts` |
 | 让 `xl build` 自己起 agent | `src/plugin/cli.js` 的 `runBuildCommand`：在 `planned` 分支里改用 `ctx.agents` / `ctx.subagents` 驱动 |
@@ -194,5 +196,6 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 7 | `XL_CONFIG` 指向不可读 / 非法 JSON 时退出 1 | `src/core/config.js` `loadConfig` | 普通 `Error` 而非 `UsageError`；其它用法错误是退出 2 |
 | 8 | `E1107` 在同一个文件内重复声明类型时也会报 | `src/core/build.js` `crossFileDiagnostics` 统计的是声明次数而非文件数 | 与 `E1106` 同时出现 |
 | 9 | `E4001` 故意不产生 | `scripts/code-map.mjs` 的 `INTENTIONALLY_UNEMITTED` | 没有子进程通道，坏产物由 `E4002` 表达 |
-| 10 | 被读入但无人消费的配置字段 | `src/core/targets.js`、`src/core/config.js` | `targets.<lang>.namespace` / `.model` 存进描述符后没人读；`targets.<lang>.layout` 根本不读；`build.verify` / `build.specHint` / `build.source` / `harness` 段不生效 |
+| 10 | 被读入但无人消费的配置字段 | `src/core/targets.js`、`src/core/config.js` | `targets.<lang>.namespace` / `.model` 存进描述符后没人读；`targets.<lang>.layout` 根本不读；`build.verify` / `build.specHint` / `build.source` / `harness` 段不生效。`build.specHint` **不会**接上生成指南（指南路径见第 11 条）：它早就是文档化的「不生效」字段，复活它要连带改两份规范 |
+| 11 | `xl_context` 里的生成指南是**文件存在性探测**的结果 | `src/plugin/tools.js` `resolveGuide` | 探测顺序是插件自带 `docs/` → 请求 `cwd` 的 `docs/`，都命中不到就回一句「没有指南」；因此**cwd 的目录内容会改变工具输出**，但指南不进 `promptHash`（`fingerprintPrompt` 的入参只有 summary / language / dependencies / layout / parts / naming），所以不影响复用判定。目前只有 cpp 带指南 |
 | 11 | 归档家族是 源 × 扩展名，不是 源 × 产物路径 | `src/core/cache.js` `latestArchives` | `layout=type` 下一个源有多个同扩展名产物时只保留其中一个的历史；这是既有粒度，见 `../README.md` §9 |

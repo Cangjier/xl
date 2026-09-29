@@ -14,6 +14,11 @@
  * @module xl/plugin/tools
  */
 
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { canonicalLang } from '../core/index.js'
+
 /** Name of every tool this plugin registers. */
 export const TOOL_NAMES = [
   'xl_plan',
@@ -24,6 +29,33 @@ export const TOOL_NAMES = [
   'xl_check',
   'xl_build',
 ]
+
+/** Plugin root, resolved from this module so a `link:` install still finds the guides. */
+const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+/**
+ * The bundled generation guide of one target language, if one exists.
+ *
+ * Guides are advisory documents, not contracts: they live in this repository's
+ * `docs/` as `xl-emit-<lang>.md` (`xl-emit-cpp.md` for the C++ plan channel;
+ * `xl-emit-ts.md` documents the direct channel, which never asks an agent to
+ * generate anything). The lookup is a file-existence check on purpose: a target
+ * with no guide — every language except C++ today — returns `exists: false`, and
+ * `xl_context` then says so instead of pointing at a file that is not there.
+ * @param {string} target - requested target language.
+ * @param {string} cwd - working directory of the request.
+ * @returns {{name: string, path: string, exists: boolean}} the guide facts.
+ */
+function resolveGuide(target, cwd) {
+  const name = `xl-emit-${canonicalLang(target)}.md`
+  // The bundled copy wins; a workspace that carries its own guide for this target
+  // is used next — either way the path reported is one that exists.
+  for (const base of [join(PLUGIN_ROOT, 'docs'), resolve(cwd, 'docs')]) {
+    const path = join(base, name)
+    if (existsSync(path)) return { name, path, exists: true }
+  }
+  return { name, path: join(PLUGIN_ROOT, 'docs', name), exists: false }
+}
 
 /**
  * Register every `xl_*` tool on a context.
@@ -153,7 +185,9 @@ function contextTool(service) {
       'Return the standardized generation context for one *.xl.md and one target language: the exact output paths',
       'to write (one per part — C++ has a header and a source part), the structural contract the product must match,',
       'the target-language sections resolved out of the source and its dependencies, and a pointer to each cached',
-      'previous version.',
+      'previous version. It also points at the generation guide bundled for that target language in this plugin, when',
+      'one exists (for example docs/xl-emit-cpp.md for C++, which recommends the file split, the type mapping, and the',
+      'member conventions); the guide is advisory and never replaces the contract.',
       'Read the *.xl.md sources and requirement documents yourself; this tool supplies what reading them cannot: the',
       'binding contract and the layout.',
     ].join(' '),
@@ -173,8 +207,9 @@ function contextTool(service) {
     output: TEXT_OUTPUT,
     async execute(args) {
       const opened = service.context({ ...args, source: args.file })
+      const guide = resolveGuide(opened.context.target, service.cwd(args.cwd))
       return {
-        text: renderContext(opened),
+        text: renderContext(opened, guide),
         source: opened.context.source,
         target: opened.context.target,
         summary: opened.context.summary,
@@ -184,6 +219,7 @@ function contextTool(service) {
           part: item.part, ext: item.ext, version: item.version, path: item.path,
         })),
         promptHash: opened.context.promptHash,
+        guide,
       }
     },
   }
@@ -454,9 +490,13 @@ export function renderPlan(result) {
 /**
  * Render a generation context for the model.
  * @param {object} opened - the `contextFor` result.
+ * @param {{name: string, path: string, exists: boolean} | null} [guide] - the
+ *   bundled generation guide of the target language, or `null` when the caller
+ *   did not look one up. A guide that does not exist is reported as missing
+ *   rather than mentioned by name.
  * @returns {string} the rendered text.
  */
-export function renderContext(opened) {
+export function renderContext(opened, guide = null) {
   const { context } = opened
   const lines = []
   const parts = [...new Set(context.outputs.map(output => output.part))]
@@ -519,10 +559,25 @@ export function renderContext(opened) {
   }
   lines.push('')
   lines.push('## Next')
-  lines.push('1. Read the source `*.xl.md` and any requirement documents you were given.')
-  lines.push('2. Call `xl_cache` when a previous version exists.')
-  lines.push(`3. Call \`xl_emit\` with file = "${context.source}", target = "${context.target}", and one entry per path above.`)
+  let step = 0
+  lines.push(`${step += 1}. Read the source \`*.xl.md\` and any requirement documents you were given.`)
+  if (guide !== null) lines.push(`${step += 1}. ${guideStep(guide, context.target)}`)
+  lines.push(`${step += 1}. Call \`xl_cache\` when a previous version exists.`)
+  lines.push(`${step += 1}. Call \`xl_emit\` with file = "${context.source}", target = "${context.target}", and one entry per path above.`)
   return lines.join('\n')
+}
+
+/**
+ * The `## Next` step that points at (or disclaims) the bundled language guide.
+ * @param {{name: string, path: string, exists: boolean}} guide - the guide facts.
+ * @param {string} target - canonical target language.
+ * @returns {string} the step body, without its number.
+ */
+function guideStep(guide, target) {
+  if (!guide.exists) {
+    return `No bundled generation guide for ${target} (\`${guide.name}\` is not shipped with this plugin); rely on the source, the contract, and the target project's own conventions.`
+  }
+  return `Read \`${guide.path}\` — the bundled ${target} generation guide (file layout, type mapping, member conventions, and the pitfalls of this target). It is advisory: the contract above and the target project's own conventions win.`
 }
 
 /**
