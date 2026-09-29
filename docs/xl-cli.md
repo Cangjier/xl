@@ -1,9 +1,9 @@
 # xl CLI 参考文档
 
-> `xl` 只有一个命令：**`xl build`**。
+> `xl` 有三个命令：**`xl build`**、**`xl check`**、**`xl targets`**。
 > 语法以 [`xl-syntax.md`](./xl-syntax.md)（下称「语法」）为唯一事实来源，本文只描述 CLI 的接口与行为，与其冲突时以语法为准。
 
-> 产物映射见 `xl-emit-ts.md`；诊断码见 `xl-check.md`；完整输入与期望产物见 [`xl-base-case.md`](./xl-base-case.md)。
+> 产物映射见 [`xl-emit-ts.md`](./xl-emit-ts.md)；诊断码见 [`xl-check.md`](./xl-check.md)；完整输入与期望产物见 [`xl-base-case.md`](./xl-base-case.md)。
 
 > 源文件是 `*.xl.md`，UTF-8 无 BOM、LF。
 
@@ -11,47 +11,70 @@
 
 ## 1. 总览
 
-`xl build` 把 `*.xl.md` 编译成目标语言代码。只有两条生成通道：
+`xl build` 把 `*.xl.md` 编译成目标语言代码。只有两条通道：
 
 ```text
-*.xl.md ──► 解析 ──► IR（语言无关） ──┬─► ts        ：内置打印器「直出」.ts
-                                      └─► 其它语言 ：*.xl.md 原文 + IR ──► DeepSeek Harness ──► 代码
+*.xl.md ──► 解析 ──► IR（语言无关） ──┬─► ts        ：xl 内置打印器「直出」.ts 并写盘
+                                      └─► 其它语言 ：xl 只给出计划与契约；
+                                                     生成由 DSH 会话里的 agent 调用 xl_* 工具完成
 ```
 
-| 目标 | 通道 | 生成者 | 是否联网 |
+| 目标 | 通道（内部名） | 生成者 | 是否联网 |
 | --- | --- | --- | --- |
-| `ts` | 直出（direct） | `xl` 内置打印器，见 `xl-emit-ts.md` | 否，完全离线、确定性、字节稳定 |
-| 其它语言 | harness | DeepSeek Harness（`dsh --profile headless`），见 §3.4 | 是 |
+| `ts` | `direct` | `xl` 内置打印器，见 [`xl-emit-ts.md`](./xl-emit-ts.md) | 否，完全离线、确定性、字节稳定 |
+| 其它语言 | `harness`（人可读输出里写作 `plan`） | 调用 `xl_*` 工具的 DSH agent | 由调用它的会话决定；`xl` 自己**不调用模型、不起子进程** |
 
 * **ts 是唯一有确定性后端的语言**：`ts` 代码块就是目标代码本体，`xl` 只做包装（补 `export`、类型映射、语法糖展开）。
-* **其它语言一律交给 DeepSeek Harness**：以该 `*.xl.md` 为唯一生成依据，`xl` 不内置这些语言的模板，也不调用模型 API 本身。
+* **其它语言一律是计划通道**：`xl` 给出产物路径、结构契约、语言上下文与上一版产物，实际代码由 agent 写、经 `xl_emit` 落盘（§3.4）。
 * 两条通道产出相同的**结构契约**：命名空间、类型名、成员名与签名一一对应。
+* 布局（`file` / `type`）与部件表（`parts`）都是**目标的属性**，不是调用的选项：没有任何命令行参数或 `xl.json` 字段能改变某一个目标产出哪些文件（§3.5）。
 
-### 1.1 术语
+### 1.1 目标
+
+| 目标 | 别名 | 产物扩展名 | 布局 | 部件 |
+| --- | --- | --- | --- | --- |
+| `ts` | `typescript` | `.ts` | `file` | `file` |
+| `csharp` | `cs`、`c#`、`.net` | `.cs` | `type` | `file` |
+| `java` | — | `.java` | `type` | `file` |
+| `python` | `py`、`python3` | `.py` | `type` | `file` |
+| `go` | `golang` | `.go` | `type` | `file` |
+| `rust` | `rs` | `.rs` | `type` | `file` |
+| `cpp` | `c++`、`cplusplus`、`cxx` | `.h` + `.cpp` | `type` | `header`（`.h`）+ `source`（`.cpp`） |
+| 自定义 | — | 由 `xl.json` 的 `targets.<lang>.ext` / `parts` 声明 | `type` | 由声明决定 |
+
+`xl targets` 打印这张表的机器可读形态（§3.7）。
+
+### 1.2 术语
 
 | 术语 | 含义 |
 | --- | --- |
 | 源文件 | `*.xl.md`，语法见 [`xl-syntax.md`](./xl-syntax.md) |
-| 段落 | 一级标题 `# …`：`dependencies` / `namespace` / `type` / `const` / `method` / `enum` / `interface` / `class` |
+| 段落 | 一级标题 `# …`：`dependencies` / `namespace` / `type` / `const` / `method` / `enum` / `interface` / `class` / `statement` |
 | 成员 | 二级标题 `## …` 及 enum 的 `- case` 列表项 |
 | 语言子标题 | `## <lang>` / `### <lang>` / `#### <lang>`，只作说明，不进默认语言产物 |
 | 依赖导入 | `# dependencies` 的 ```` ```xl ```` 块里 `import { … } from "./x.xl.md"` |
-| IR | 解析后的语言无关结构（内部表示），build 用它做校验与产物核对 |
+| IR | 解析后的语言无关结构（内部表示），build 用它做校验、计划与产物核对 |
 | 产物 | 生成的目标语言文件，首三行是 `@generated` 头与指纹（§3.6） |
-| harness | DeepSeek Harness 的一次性任务入口，非 ts 目标的代码生成者 |
+| 部件（part） | 一个「源 × 目标」单元产出的一份文件；只有 `cpp` 有两个（§3.5） |
+| 计划通道 | 非 ts 目标的通道：`xl` 计划 + agent 生成 + `xl_emit` 落盘 |
 
 ---
 
 ## 2. 安装与调用
 
+`xl` 命令由 **`xl` profile** 提供（bundle patch 里的 `xl-cli` 行只在 profile 名为 `xl` 时启用）。安装见 [`../README.md`](../README.md) §2。
+
 ```bash
-npx xl build demo.xl.md -t csharp     # 一次性
-npm i -g @xl/cli && xl build . -t ts  # 全局
-pnpm xl build . -t ts                 # 本仓库开发态
-xl build --help                       # 帮助（没有额外的 help 命令）
+xl build                              # 编译当前目录下所有 *.xl.md（缺省 -t ts）
+xl build pkg/demo.xl.md -t csharp     # 单文件、指定目标
+xl build . -t ts -t csharp -t cpp     # 多目标；ts 写盘，其余只给计划
+xl check .                            # 只做静态检查
+xl targets                            # 列出已知目标
+xl --help                             # 帮助（没有额外的 help 命令）
+xl --version                          # 版本
 ```
 
-Node.js ≥ 20，Windows / macOS / Linux。所有路径参数同时接受文件、目录与 glob（§3.2）。
+Node.js ≥ 20，Windows / macOS / Linux。所有路径参数同时接受文件、目录与 glob（§3.2）。所有输出路径一律用 POSIX 分隔符，便于跨平台比对。
 
 ---
 
@@ -65,45 +88,48 @@ xl build [paths...] [options]
 
 | 分组 | 选项 | 作用 |
 | --- | --- | --- |
-| 目标 | `-t, --target <lang>` | 目标语言，可重复（`-t ts -t csharp`）；缺省取 `xl.json` 的 `build.target`，再缺省为 `ts` |
-| 输出 | `-o, --out <dir>` | 输出根目录（缺省：源文件同级目录，或 `xl.json` 的 `build.out`） |
-| 输出 | `--layout <mode>` | `file` \| `type`（缺省按目标，§3.5） |
-| 输出 | `--flat` | 丢弃源文件相对目录层级，所有产物写到 `--out` 根 |
-| 输出 | `--stdout` | 产物正文写标准输出、不落盘（建议配合 `-t` / `paths` 限定） |
-| 生成 | `--naming <mode>` | `idiomatic`（缺省）\| `preserve`：目标语言命名策略 |
-| 生成 | `--force` | 忽略指纹与缓存，强制重新生成 |
-| 生成 | `--no-cache` | 本次不读写增量缓存 `.xl/cache.json`（不影响历史版本 cache，§3.6） |
-| 生成 | `--clean` | 构建前删除本次会覆盖的旧产物 |
-| 生成 | `--concurrency <n>` | 并发任务数（缺省 `min(4, CPU)`；harness 通道建议 ≤ 4） |
-| 生成 | `--keep-going` | 单个文件失败后继续构建其余文件（退出码 4） |
-| 生成 | `--dry-run` | 只打印「源 → 产物」计划与将要执行的 harness 命令，不写盘、不调用 harness |
-| harness | `--harness <cmd>` | harness 可执行文件（缺省 `dsh`，或 `xl.json` 的 `harness.command`） |
-| harness | `--harness-profile <name>` | harness profile（缺省 `headless`） |
-| harness | `--timeout <sec>` | 单次 harness 调用超时（缺省 600） |
-| harness | `--retries <n>` | harness 失败重试次数（缺省 2，指数退避） |
-| harness | `--verify` / `--no-verify` | 产物结构回读校验（缺省开，§3.4） |
+| 目标 | `-t, --target <lang>` | 目标语言，可重复（`-t ts -t csharp`）。缺省顺序见下方「缺省目标」 |
+| 输出 | `-o, --out <dir>` | 输出根目录（缺省取 `xl.json` 的 `build.out`，再缺省 `dist`）；每个目标语言各自一层子目录（§3.5） |
+| 输出 | `--flat` | 丢弃源文件相对目录层级，所有产物写到该语言的目录下 |
+| 输出 | `--stdout` | 产物（含 `@generated` 头）写标准输出、不落盘 |
+| 生成 | `--naming <mode>` | `idiomatic`（缺省）\| `preserve`：类型文件的命名策略（§3.5） |
+| 生成 | `--force` | 忽略复用判定，强制重新生成；并允许覆盖计划路径上的非 xl 产物 |
+| 生成 | `--no-cache` | 本次不读也不写增量缓存 `cache.json`，也不报告手改检测；**历史版本归档仍会写**（§3.6） |
+| 生成 | `--clean` | 写盘前删除本次会覆盖的旧产物（归档已经完成） |
+| 生成 | `--dry-run` | 只打印「源 → 产物」计划，不写盘（照常报告输出冲突与手改提示） |
+| 生成 | `--verify` / `--no-verify` | **接受但不生效**：只决定 `xl_emit` 工具的 `verify` 缺省（§3.4） |
+| 校验 | `--ignore <codes>` | 忽略指定诊断码，逗号分隔，如 `--ignore W3011,E1107` |
+| 校验 | `--strict` | warning 视为 error（**只对 `xl check` 生效**，§3.8） |
+| 校验 | `--max-warnings <n>` | warning 超过 n 条即失败（**只对 `xl check` 生效**；缺省不限） |
+| 输出 | `--format <fmt>` | `pretty`（缺省）\| `compact` \| `json`（§3.7） |
 | 全局 | `--cwd <dir>` | 以指定目录为基准解析路径与配置（缺省当前目录） |
-| 全局 | `-q, --quiet` | 只输出错误 |
-| 全局 | `--verbose` | 输出调试信息（计划、prompt 摘要、harness 命令与耗时） |
+| 全局 | `-q, --quiet` | 只输出 error |
+| 全局 | `--verbose` | 额外把计划与提示写到 stderr |
 | 全局 | `--json` | NDJSON 事件流（§3.7），不写人类可读输出 |
-| 全局 | `--color <when>` | `auto`（缺省）\| `always` \| `never` |
+| 全局 | `--color <when>` | `auto`（缺省）\| `always` \| `never`；**接受但不生效**（输出不带 ANSI 颜色） |
 | 全局 | `-h, --help` / `-v, --version` | 帮助 / 版本 |
 
-同一目标只构建一次；`-t` 重复给同一语言时后者去重。**配置优先级**：CLI 参数 > 环境变量 > `xl.json` > 内置缺省。
+**接受但无效的选项**：`--harness` / `--harness-profile` / `--timeout` / `--retries` / `--keep-going` / `--concurrency` / `--verify` / `--no-verify`。它们属于「xl 自己 spawn harness」的旧设计；本实现没有子进程通道，因此只是为了让既有命令行不报错而被接受，`--verbose` 下会提示一次。`--concurrency` 不影响结果（ts 打印是同步的），`--verify` / `--no-verify` 只影响 `xl_emit` 工具的缺省（§3.4）。
+
+**只属于 `xl check` 的判定项**：`--strict` 与 `--max-warnings` 在 `xl build` 上被接受但不读取——`xl build` 的退出码只由 error 数决定（§3.8）。
+
+**缺省目标**的解析顺序是 `-t` / `--target` → 服务行的 `defaultTargets`（bundle patch 里是 `['ts']`）→ `xl.json` 的 `build.target` → `ts`。注意第二级会**盖住** `xl.json`：按 `cordis.patch.yml` 装好后，`build.target` 实际不生效（`xl build` 与七个工具都走这条路径）；把行配置的 `defaultTargets` 设为 `[]` 才会轮到 `xl.json`。
+
+同一目标只构建一次；`-t` 重复给同一语言时去重（按别名归一后的规范名）。**配置优先级**：CLI 参数 > 环境变量 > `xl.json` > 内置缺省（环境变量这一级只有 `xl build` 应用，见 §5）。
 
 ### 3.2 输入解析
 
-1. 展开每个 `paths`：文件 → 自身；目录 → 递归 `**/*.xl.md`；glob → 匹配结果；缺省等价于 `.`。
-2. 过滤：排除 `node_modules`、`.git`、`dist`、`build` 与 `.xlignore` 中的模式；产物文件（首行含 `@generated by xl`）永不作为输入。
+1. 展开每个 `paths`：文件 → 自身（显式给出的文件不检查 `.xl.md` 后缀，直接当源文件解析）；目录 → 递归 `**/*.xl.md`；glob → 匹配结果（支持 `*`、`**`、`?`、`[abc]`、`{a,b}`）；缺省等价于 `.`。`--` 之后的参数一律当路径。
+2. 过滤：排除目录 `node_modules`、`.git`、`dist`、`build`、`.xl`，以及 `.xlignore` 里的模式（该文件在工作目录根部，`#` 起首为注释）；产物文件（首行含 `@generated by xl`）永不作为输入。
 3. 去重并按路径字典序排序，保证产物与事件顺序稳定。
-4. 每个源文件先解析并校验（语法错误见 `xl-check.md`）：**有 error 就终止**，退出码 1；warning 只提示。
-5. `# dependencies` 里的 ```` ```xl ```` 块解析出跨文件引用，用于校验类型可见性与补齐生成上下文；依赖文件不因为被引用就参与构建，产物仍然只按 `paths` 生成。
-6. 结果为空（路径不存在、或没有匹配到 `*.xl.md`）→ 用法错误，退出码 2。
+4. 每个源文件先解析并校验（语法错误见 [`xl-check.md`](./xl-check.md)）：**有 error 就终止**，退出码 1；warning 只提示。
+5. `# dependencies` 里的 ```` ```xl ```` 块解析出跨文件引用，用于校验类型可见性与补齐生成上下文；依赖文件不因为被引用就参与构建，产物仍然只按 `paths` 生成（依赖文件自身的诊断也不出现在输出里）。
+6. 结果为空（路径不存在 `E0001`、或没有匹配到 `*.xl.md` `E0002`）→ 用法错误，退出码 2。
 
 ### 3.3 `-t ts`：直出
 
-* `ts` 代码块**原样**成为方法体 / 字段初始化表达式，只做最小规范化（统一缩进、去尾随空白）。
-* 由声明本身派生出的包装规则（完整列表见 `xl-emit-ts.md`，期望产物见 [`xl-base-case.md`](./xl-base-case.md)）：
+* `ts` 代码块**原样**成为方法体 / 字段初始化表达式，只做最小规范化（统一换行、去尾随空白、去公共缩进；`xl-emit-ts.md` §11）。
+* 由声明本身派生出的包装规则（完整列表见 [`xl-emit-ts.md`](./xl-emit-ts.md)，期望产物见 [`xl-base-case.md`](./xl-base-case.md)）：
   * 顶层 `# interface` / `# class` / `# enum` / `# type` / `# const` / `# method` → 加 `export`；`# statement`（语法 §17）不加任何前缀，默认语言块原样成为一个段落；
   * `readonly field id:string` → `public readonly id: string`（`static`、`private` 同理）；
   * `## property label:string` + `### get` / `### private set` → 私有字段 `#label` + `get` / `set` 访问器；
@@ -115,168 +141,194 @@ xl build [paths...] [options]
   | 源类型 | ts |
   | --- | --- |
   | `int` / `float` / `double` / `number` | `number` |
-  | `bool` | `boolean` |
-  | `string` / `any` / `void` | 同名 |
+  | `bool` / `boolean` | `boolean` |
+  | `string` / `any` / `void` / `undefined` / `null` / `never` / `unknown` / `object` | 同名 |
   | `Array<T>` / `T[]` | `T[]`（`Array<Array<int>>` → `number[][]`） |
   | `ReadonlyArray<T>` | `readonly T[]` |
-  | `Map<K,V>` / `Set<T>` / `Promise<T>` / `Generator<T>` | 同名 |
+  | `Map<K,V>` / `Set<T>` / `Promise<T>` / `Generator<T>` / `AsyncGenerator<T>` / `Record<…>` / `Partial<…>` / `Readonly<…>` | 同名，实参递归映射 |
+  | 其它具名类型 | 原样保留 |
   | 字面量类型（`"printable"` / `2` / `true`） | 原样保留 |
-  | `T?`（参数 / 字段后缀） | 字段用 `T?`，参数用 `??` |
+  | 函数类型 `(a:int)=>void` | `(a: number) => void` |
+  | 联合 `A \| B` | 原样保留 |
 
-* **ts 构建永不联网**：即使命令行里同时给了 `-t ts -t csharp`，ts 部分也不读取任何 provider / harness 配置。
+* **ts 构建永不联网**：即使命令行里同时给了 `-t ts -t csharp`，ts 部分也不读取任何 provider / 模型配置。
+* 一次 `xl build` 只会把 **ts 产物**写到磁盘，并为它记录增量缓存（§3.6）。
 
-### 3.4 其它语言：调用 DeepSeek Harness
+### 3.4 其它语言：计划通道
 
-非 `ts` 目标不直出：`xl` 把该 `*.xl.md` 交给 DeepSeek Harness，由它生成目标语言代码。
+非 `ts` 目标不生成代码：`xl build -t csharp` 是一条**纯计划命令**，它打印每个「源 × 目标」要产出的文件路径、复用判定，然后提示下一步就退出（不写盘、不调用模型、不启动子进程）：
 
-**调用形态**（粒度 = 一个源文件 × 一个目标，逐次调用）：
-
-```bash
-# xl 实际执行的形态：prompt 从 stdin 进入（harness 的一次性任务契约）
-dsh --profile headless --json < <prompt-file>
+```console
+$ xl build . -t csharp
+[csharp] pkg/demo.xl.md -> dist/csharp/pkg/DemoModule.cs, dist/csharp/pkg/Point.cs (planned — missing artifact dist/csharp/pkg/DemoModule.cs) — generate it in a DSH session with the xl_* tools
+✔ build done in 0.0s — 0 written, 0 skipped, 1 planned, 0 error(s)
+planned outputs belong to a DSH session: call xl_context, then xl_emit.
 ```
 
-* prompt 走 stdin：`dsh --profile headless` 在**没有位置参数**时把 stdin 全文当作任务；空输入是用法错误。
-* 取回答案：`--json` 时读事件流末尾 `final` 事件的 `text`（`final` 不截断，其余事件字段有上限）；不用 `--json` 时读 stdout 的最终答案。
-* harness 的 stderr（推理过程、`dsh:` 诊断）由 `xl` 吸收：只在 `--verbose` 下转发，绝不混入待解析的答案。
-* **成功判据**：harness 进程退出码为 0 **且**答案非空。非 0、空答案、超时、答案被截断都按失败处理。
-* **密钥与模型归属**：模型、凭据、profile 组合都属于 harness 自身配置，`xl` 不解析 provider、不接触密钥；需要透传环境变量（例如 `skEnv` 指向的密钥变量）时用 `xl.json` 的 `harness.env`。仓库根部的 `ai-sdk.json` 是 provider 声明（`name` / `skEnv` / `url` / `model` / `message_options`），供 harness 侧配置使用。
+生成由 DSH 会话里的 agent 完成，它用这七个模型工具（`xl_*`）：
 
-**prompt 组成**（按序拼接，全部来自该源文件及其依赖，保证「基于 `*.xl.md` 生成」）：
+| 工具 | 作用 |
+| --- | --- |
+| `xl_plan` | 列出源与每个「源 × 目标」的计划产物、复用判定（与 `xl build -t <其它语言>` 看到的是同一份计划数据） |
+| `xl_context` | 一份「源 × 目标」的完整生成依据：契约（结构摘要 + 输出路径 + 部件 + `layout`）、`promptHash`、该源与依赖的目标语言覆盖段、上一版产物 |
+| `xl_cache` | 该「源 × 目标」的缓存状态：是否 reusable、源指纹、`promptHash`、上一版（按部件扩展名给） |
+| `xl_verify` | 不写盘地校验候选产物（结构回读） |
+| `xl_emit` | 校验并写盘：加产物头与指纹、归档被覆盖的那一版、更新 cache；漏产物 / 多产物 / 结构不符一律拒绝且不写盘 |
+| `xl_check` | 与 `xl check` 同一个检查器 |
+| `xl_build` | 与 `xl build` 同一个构建器（ts 写盘，其余只给计划） |
 
-| # | 段 | 内容 | 来源 |
-| --- | --- | --- | --- |
-| 1 | 语法速查 | xl-md 的关键字与结构说明，让模型按同一套语法理解源文件 | 内置精简版；`build.specHint` 可指向 `docs/xl-syntax.md` |
-| 2 | 源文件原文 | 完整 `*.xl.md` 文本——**唯一生成依据** | 输入文件 |
-| 3 | 结构摘要 | 解析后的类型 / 成员 / 签名清单（JSON），避免模型误解语法糖 | IR |
-| 4 | 语言上下文 | `# namespace` 说明、`# dependencies` 的 `## <lang>` 段与其代码块、依赖导入的模块名与导入名 | 源文件 + 依赖文件 |
-| 5 | 既有实现 | 上一版产物，要求「在它之上改」而不是重写 | `.xl/cache/**`（§3.6） |
-| 6 | 任务 | 目标语言、命名策略、输出契约 | CLI / `xl.json` |
+**输出契约**（写进 `xl_context`，并由 `xl_emit` 的结构回读强制）：
 
-**输出契约**（写进 prompt，并由后置校验强制）：
-
-* 只输出目标语言代码：不加 Markdown 围栏，不写对话 / 工具调用标记，不写 `@generated` 头（由 `xl` 统一追加，§3.6）。
-* `layout=file`：只输出**一个**文件，不带分隔头。
-* `layout=type`：用约定分隔头切分文件，如 `// FILE: Point.cs`；模块级 `# method` / `# const` 没有类型名，必须全部写进 `// FILE: <源文件基名>Module.<ext>` 一个文件。
+* `xl_emit` 的 `files` 必须**逐一对应**计划报出的路径：给出计划外的路径报 `E2001`；漏掉计划内的路径、或产物结构与 IR 不一致报 `E4002`，且**一个文件都不写**。
+* 产物内容只写目标语言代码：不加 Markdown 围栏，不写对话 / 工具调用标记，不写 `@generated` 头（由 `xl` 统一追加，§3.6）。
+* `layout=file` 的单元只有一份产物；`layout=type` 每个类型一份，模块级 `# type` / `# const` / `# method` / `# statement` 合并进 `<源文件基名>Module.<ext>` 一份。
 * import / using 集中在文件最前面；同一个文件里不重复声明命名空间。
 * 类型名、成员名、参数名、可见性、泛型约束与 `readonly` / `static` / `async` 语义必须与 IR 一致；不得凭空增加公开 API；不得吞掉 `## <lang>` 段里的明确说明。
 
-**失败、重试与校验**：
+**结构回读校验**（`xl_verify` / `xl_emit`）是轻量符号扫描，不是解析器，只核对三件事：
 
-* 网络错误、超时、非 0 退出、空答案 → 按 `--retries` 指数退避重试；仍失败 → 该文件失败（诊断码见 `xl-check.md`），退出码 3（`--keep-going` 时为 4）。
-* **结构回读校验**（`--verify`，缺省开）：对产物做轻量符号扫描，核对「类型集合 / 成员名集合 / 参数个数」与 IR 一致；不一致时把差异作为追加提示重试一次，再失败即判定该文件失败。
-* 一个文件失败不影响其它文件（`--keep-going`），也不影响已成功的产物写入。
+| 核对 | 规则 |
+| --- | --- |
+| 类型集合 | IR 里的每个 `enum` / `interface` / `class` 必须在产物里出现（声明或被提到） |
+| 成员名集合 | 声明部件（默认，`scope: declaration`）必须提到每个成员；定义部件（`cpp` 的 `.cpp`，`scope: definition`）只要求提到它实现的那个类型，以及它确实写出来的成员 |
+| 参数个数 | 产物里同名成员的参数个数必须与 IR 中的某个声明一致（允许重载） |
+
+模块级 `# method` / `# const` / `# type` 同表核对；`# statement` 不参与（它不声明名字）。
+
+**`promptHash`** 是生成上下文的指纹：`sha256(结构摘要 + 语言覆盖段 + 依赖摘要 + layout + parts + naming)` 的前 16 个十六进制字符，**不含源文件原文**（原文由 `xl:sha256` 表达）。它变了就说明生成依据变了，cache 因此失效。
+
+**工具参数的覆盖范围**：`xl_plan` / `xl_build` 可以给 `naming` / `flat` / `out`，`xl_context` / `xl_cache` 可以给 `out` / `naming` / `flat`，但 `xl_verify` 只接受 `out`、`xl_emit` 只接受 `out` 与 `force` —— 命名与压平只能来自 `xl.json`（或缺省）。所以 `--flat` 或 `naming: preserve` 的计划无法通过 `xl_emit` 落盘：路径对不上，`xl_emit` 会以 `E2001` 拒绝。端到端可用的组合是「不压平 + `xl.json` 里的 `naming`」。
 
 ### 3.5 输出布局
 
-源文件 `pkg/demo.xl.md`，`xl build . -o dist -t ts -t csharp`：
+产物一律落在 `<out>/<目标语言>/…`。`out` 的取值顺序是 `-o` / `--out` → `XL_OUT` → `xl.json` 的 `build.out` → `dist`。源文件 `pkg/demo.xl.md`，`xl build . -o dist -t ts -t csharp -t cpp -t python`：
 
 ```text
 dist/
-  pkg/demo.ts                  # ts / layout=file：一个源文件一个产物
-  csharp/pkg/DemoModule.cs     # layout=type：模块级 # method / # const 合并到这里
-  csharp/pkg/IPrintable.cs     # layout=type：interface 各成一文件
-  csharp/pkg/Point.cs
-  csharp/pkg/Box.cs
-  csharp/pkg/Cache.cs
-  csharp/pkg/Color.cs          # enum 也各成一文件
+  ts/pkg/demo.ts                 # ts / layout=file：一个源文件一个产物
+  csharp/pkg/DemoModule.cs       # layout=type：模块级 # type / # const / # method / # statement 合并到这里
+  csharp/pkg/IPrintable.cs       # layout=type：interface 各成一文件
+  csharp/pkg/Point.cs            # 每个类型各成一文件，enum 也是
+  cpp/pkg/demo_module.h          # cpp 一个单元两个部件：header …
+  cpp/pkg/demo_module.cpp        #   … 与 source（该单元有函数体，所以被计划）
+  cpp/pkg/point.h
+  python/pkg/demo_module.py      # 语言目录对所有目标都存在，`type` 布局也不例外
 ```
 
-| 目标 | 通道 | 产物扩展名 | 缺省 `layout` |
-| --- | --- | --- | --- |
-| `ts` | 直出 | `.ts` | `file` |
-| `csharp` | harness | `.cs` | `type` |
-| `java` | harness | `.java` | `type`（public 类名 = 文件名，强制 `type`） |
-| `python` | harness | `.py` | `file` |
-| `go` | harness | `.go` | `file` |
-| `rust` | harness | `.rs` | `file` |
-| 自定义 | harness | 须在 `xl.json` 的 `targets.<lang>.ext` 声明 | `file` |
+| 目标 | 通道 | 产物扩展名 | 布局 | 多部件？ |
+| --- | --- | --- | --- | --- |
+| `ts` | 直出 | `.ts` | `file` | 否 |
+| `csharp` | 计划 | `.cs` | `type` | 否 |
+| `java` | 计划 | `.java` | `type` | 否 |
+| `python` | 计划 | `.py` | `type` | 否 |
+| `go` | 计划 | `.go` | `type` | 否 |
+| `rust` | 计划 | `.rs` | `type` | 否 |
+| `cpp` | 计划 | `.h` + `.cpp` | `type` | 是 |
+| 自定义 | 计划 | 由 `xl.json` 声明 | 恒为 `type` | 由 `parts` 决定 |
 
-* 源文件相对路径在 `--out` 下保留（`--flat` 关闭该行为）；`layout=type` 同样保留（`dist/<target>/<源目录>/<名字><ext>`）。保留目录不是装饰：不同源目录里完全可能有同名符号，压平会让两个源文件写同一个路径而静默丢掉一个。
-* `layout=type` 的文件名遵循 `--naming`：`idiomatic` 时 C# / Java / Go 用 `PascalCase`，Python / Rust 用 `snake_case`；`preserve` 时原样。
-* 同一个产物路径被计划写多次（`--flat` 或撞名）→ 报输出冲突（诊断码见 `xl-check.md`），退出码 1，**绝不静默覆盖**。
-* 目标位置已存在**非 xl 产物**文件且无 `--force` → 输出冲突，退出码 1。
+* **布局恒定**：`ts` 恒为 `file`，其余目标（含自定义目标）恒为 `type`。命令行与工具都没有 layout 参数，`xl.json` 的 `targets.<lang>.layout` 根本没有被读取。
+* **部件表决定一个单元产出几份文件**：`cpp` 声明 `header`（`.h`）与 `source`（`.cpp`），后者带 `requires: "bodies"`，只在单元确实有可执行内容时计划——`enum` / `interface` / `# type` 只声明，永远只有 `.h`；`# statement` 一定有；类与模块级 `# method` / `# const` 在有函数体、代码块初始值或该语言的覆盖段代码时才有 `.cpp`。判定只依赖 IR 与目标名，所以同一份源的计划是确定的。
+* **模块文件**：`layout=type` 下，`# type` / `# const` / `# method` / `# statement` 都没有目标语言类型名，因此合并进一个 `<源文件基名>Module.<ext>`（基名经 `--naming` 变换）；`enum` / `interface` / `class` 各成一文件。
+* **命名策略** `--naming`：
+  * `idiomatic`（缺省）：`csharp` / `java` / `go` 用 `PascalCase`，`python` / `rust` / `cpp` 用 `snake_case`（`HTTPClient` → `http_client.h`），其余原样；`csharp` / `java` 的 interface 另加 `I` 前缀（`printable` → `IPrintable.cs`，已经有 `I` + 大写开头时不重复加）。
+  * `preserve`：类型名 / 基名原样成为文件名。
+* 源文件相对路径在 `<out>/<目标语言>` 下保留（`--flat` 关闭该行为）。保留目录不是装饰：不同源目录里完全可能有同名符号，压平会让两个源文件写同一个路径而静默丢掉一个。
+* `out` 是**相对工作目录**的路径前缀，不要给绝对路径：计划路径直接把它拼在语言目录之前，绝对路径会被拼进工作目录里（`C:/x` 会变成 `<cwd>/C:/x/…`）。`../out` 这类相对上跳是可行的。
+* 同一个产物路径被计划写多次（`--flat` 或撞名）→ 报输出冲突 `E2001`，退出码 1，**绝不静默覆盖**。
+* 目标位置已存在**非 xl 产物**文件且无 `--force` → 输出冲突 `E2001`，退出码 1。
 
 ### 3.6 产物头、指纹与增量
 
-产物首部固定三行（ts 用 `//`，其它语言用各自注释符），之后**空一行**再接正文，与 [`xl-base-case.md`](./xl-base-case.md) 的期望产物一致：
+产物首部固定三行（ts 用 `//`，其它语言按该目标的注释符），之后**空一行**再接正文，与 [`xl-base-case.md`](./xl-base-case.md) 的期望产物一致：
 
 ```ts
 // @generated by xl from pkg/demo.xl.md
-// xl:sha256:9f2c… xl:target:ts xl:ver:0.1.0
+// xl:sha256:9f2c…  xl:target:ts  xl:ver:0.1.0
 // DO NOT EDIT — 修改请改 xl.md 并重新生成
 ```
 
-* `xl:sha256:<key>` = `sha256(规范化源文件字节)`；harness 通道额外记录 `xl:model:<id>` 与 `xl:prompt:<hash>`（prompt 组成变化即指纹变化）。
-* **增量规则**：产物存在、首行是 xl 头、指纹与 target（harness 通道再加 model / promptHash）全部匹配 → 跳过，不解析、不调用 harness。
-* 增量缓存写在 `.xl/cache.json`（逐文件指纹、产物路径、产物内容指纹）。`--force` 忽略缓存；`--no-cache` 本次不读也不写该文件。
-* **历史版本 cache**（`.xl/cache/<镜像源路径>.<扩展名>.<N>`）：覆盖旧产物前把被覆盖的那一份归档为下一序号，只保留最近 `build.cacheVersions` 版（缺省 5，`false` / `0` 关闭）。最新一版进入 harness prompt 的「既有实现」段（§3.4），因此版本一变就会重新生成。它只是中间产物，删除目录即可清空。
-* 产物被手工修改（头在、指纹不匹配）→ 覆盖前打印警告（诊断码见 `xl-check.md`）；`--dry-run` 时只提示。
+* 字段之间以**两个空格**分隔。直出通道写 `xl:sha256` / `xl:target` / `xl:ver` 三个字段；计划通道的产物由 `xl_emit` 落盘，另加 `xl:model:<id>`（`xl_emit` 的 `model` 参数）与 `xl:prompt:<hash>`（§3.4）。
+* `xl:sha256:<key>` = `sha256(规范化源文件字节)`，规范化只统一换行，因此只改行尾不会让产物失效。
+* `xl.json` 的 `build.header: false` 时不写头三行。
+* **复用判定**：计划中的每个产物都存在、首行是 xl 头、`xl:target` 是本目标、`xl:sha256` 等于当前源指纹 → 直出通道跳过不写、计划通道报 `reusable`。`--force` 忽略该判定。
+* **增量缓存**位于该语言目录下：`<out>/<目标语言>/.xl/cache.json`（每个「源 × 目标」的源指纹、产物路径、产物内容哈希、model、promptHash、写入时间）。`--no-cache` 本次不读也不写这个文件（但归档照旧）；`build.cacheDir` / `XL_CACHE_DIR` 改变目录名（相对值仍在语言目录之下，绝对值原样使用）。直出通道只记录源指纹 / 产物路径 / 内容哈希；`model` 与 `promptHash` 由 `xl_emit` 记录。
+* **历史版本 cache**（`<out>/<目标语言>/.xl/cache/<源相对路径去掉 .xl.md>.<扩展名>.<N>`）：覆盖旧产物前把被覆盖的那一份归档为下一序号，只保留最近 `build.cacheVersions` 版（缺省 5，`false` / `0` 关闭）。归档家族按**源 × 扩展名**组织：`cpp` 的 `.h` 与 `.cpp` 各有自己的历史，因此「上一版」是按部件给出的（`xl_cache` / `xl_context` 的 `previous` 数组）。最新一版是计划通道的「既有实现」，版本一变 `promptHash` 的输入也就变了。
+* 缓存是**尽力而为**：只计划不落盘（`xl_plan`、`xl build -t <其它语言>`）不会建出 cache 目录；cache 写失败不影响已经写好的产物。
+* 产物被手工修改（头在、内容哈希与 cache 记录不符）→ 覆盖前打印警告 `E2003`；`--dry-run` 时同样提示，只是不写盘。`--no-cache` 时无从判断，因此不报告。
 
 ### 3.7 控制台输出与 `--json`
 
 ```console
-$ xl build . -t ts -t csharp --verbose
-[scan]  2 files: pkg/demo.xl.md, pkg/util.xl.md
-[ts]    pkg/demo.xl.md -> dist/pkg/demo.ts      (direct, 2.1ms)
-[harness] pkg/demo.xl.md -> dist/csharp/{Point,Box,Cache,Color,IPrintable,Module}.cs
-          dsh --profile headless --json · 1 call · 12.4s
-[harness] pkg/util.xl.md -> dist/csharp/Util.cs (retry 1/2: harness exited 1)
-✔ build done in 14.8s — 8 written, 1 skipped, 0 errors
+$ xl build . -t ts -t csharp
+[ts] pkg/demo.xl.md -> dist/ts/pkg/demo.ts (generated)
+[csharp] pkg/demo.xl.md -> dist/csharp/pkg/DemoModule.cs, dist/csharp/pkg/Point.cs (planned — missing artifact dist/csharp/pkg/DemoModule.cs) — generate it in a DSH session with the xl_* tools
+✔ build done in 0.0s — 1 written, 0 skipped, 1 planned, 0 error(s)
+planned outputs belong to a DSH session: call xl_context, then xl_emit.
 ```
 
-* 缺省每个「源 → 产物」一行 + 末尾汇总；`--quiet` 略去汇总；`--verbose` 额外把计划、prompt 摘要与 harness 命令写到 stderr。
-* `--dry-run`：只输出计划与将要执行的 harness 命令，不写盘、不调用 harness。
-* `--stdout`：产物正文写 stdout、不落盘。
-* `--json`：NDJSON 事件流（每行一个对象，`ev` 是事件名）。
+* 每个「源 × 目标」一行：`[<目标>] <源> -> <产物路径…> (<状态><— 原因>)`。状态是 `generated` / `skipped` / `planned` / `failed`。
+* 末尾一行汇总：`✔|✖ build done in <秒>s — <写盘数> written, <跳过数> skipped[, <计划数> planned], <错误数> error(s)`。
+* 诊断一律写到 **stderr**：`<path>:<line>:<col>: <severity>[<code>]: <message>`，`--format pretty`（缺省）另附源码行、`^` 下划线与 `help:` 行；`--format compact` 每行一条。
+* `--quiet` 略去进度行与汇总，只保留 error 级诊断；`--verbose` 额外把计划行与「选项被接受但无效」的提示写到 stderr。
+* `--dry-run`：只输出计划（`planned`），不写盘、不建 cache。
+* `--stdout`：ts 产物（含头）写 stdout、不落盘；计划通道不受影响。
+* `--json`：stdout 变成 NDJSON 事件流（每行一个对象，`ev` 是事件名），此时不再输出任何人类可读的进度行或诊断文本。
 
-| `ev` | 字段 |
-| --- | --- |
-| `build.start` | `targets` `files` |
-| `file.plan` | `src` `target` `channel`（`direct` / `harness`）`out` |
-| `file.done` | `src` `target` `channel` `status`（`generated` / `skipped` / `failed`）`out` |
-| `harness.call` | `src` `target` `attempt` `ms`，可选 `sessionId`（§3.4 的 `--json` 事件流里 harness 自报的会话） |
-| `build.warn` / `build.error` | `src` `target` `msg` |
-| `build.end` | `ok` `written` `skipped` `warnings` `errors` `ms` |
+| 命令 | `ev` | 字段 |
+| --- | --- | --- |
+| `build` | `build.start` | `targets` `files` |
+| `build` | `file.plan` | `src` `target` `channel`（`direct` / `harness`）`out` |
+| `build` | `file.done` | `src` `target` `channel` `status`（`generated` / `skipped` / `planned` / `failed`）`out` |
+| 两者 | `diag` | `file` `line` `col` `severity` `code` `msg`，可选 `help` `endLine` `endCol` |
+| `build` | `build.warn` / `build.error` | `msg` `src` `target` |
+| `build` | `build.end` | `ok` `written` `skipped` `planned` `warnings` `errors` `ms` |
+| `check` | `check.end` | `ok` `files` `errors` `warnings` |
+| `targets` | `target` | `name` `channel`（`direct` / `harness`）`ext`（逗号分隔的扩展名）`layout` `parts` |
+
+> `channel` 字段用的是内部名 `direct` / `harness`；人可读输出把它渲染为 `direct` / `plan`。
+
+`xl targets` 的输出是制表符分隔的四列 `名称 <TAB> 通道 <TAB> 扩展名（逗号分隔） <TAB> 布局`，没有表头：
+
+```console
+$ xl targets
+ts	direct	.ts	file
+csharp	plan	.cs	type
+java	plan	.java	type
+python	plan	.py	type
+go	plan	.go	type
+rust	plan	.rs	type
+cpp	plan	.h,.cpp	type
+```
 
 ### 3.8 退出码
 
 | 码 | 含义 |
 | --- | --- |
-| 0 | 成功（允许存在 warning） |
+| 0 | 成功（允许存在 warning）；`xl build` 下有目标只被计划也算成功 |
 | 1 | 源文件有 error、输出冲突、写盘失败 |
-| 2 | 用法错误（未知选项、无输入、非法 `--target`、缺扩展名的自定义目标） |
-| 3 | harness 失败（非 0 退出、超时、空答案、重试耗尽、结构回读校验不通过） |
-| 4 | `--keep-going` 下部分文件失败 |
+| 2 | 用法错误（未知命令 / 未知选项 / 无输入 / 路径不存在 `E0001` / 没匹配到输入 `E0002` / 非法 `--target` `E0003` / 未声明扩展名或部件表的自定义目标 `E0004`） |
+
+> `xl` 不返回 3 / 4：计划通道的失败由会话里的 `xl_emit` 以 `E4002` 表达（[`xl-check.md`](./xl-check.md) §5）。
+> `--ignore` 会把这些码从计数里移除，因此 `--ignore E2002` 之类可以在写盘失败后仍然返回 0——只有计划路径冲突（`E2001`）在冲突阶段就无条件返回 1。
 
 ---
 
 ## 4. 配置文件 `xl.json`
 
-查找顺序：`--cwd` 起逐级向上找 `xl.json` → `xl.config.json` → `package.json` 的 `"xl"` 字段；`XL_CONFIG` 显式指定。
+查找顺序：`XL_CONFIG` 显式指定 → 从 `--cwd` 逐级向上找 `xl.json` → `xl.config.json` → `package.json` 的 `"xl"` 字段。
 
 ```jsonc
 {
-  "source": ["src/**/*.xl.md"],
   "build": {
-    "target": ["ts"],             // 缺省目标
-    "out": "dist",
-    "layout": { "ts": "file", "csharp": "type" },
+    "target": ["ts"],             // 缺省目标：字符串或数组
+    "out": "dist",                // 输出根目录
     "naming": "idiomatic",        // idiomatic | preserve
-    "concurrency": 4,
-    "verify": true,
     "header": true,               // 是否写 @generated 头
-    "cacheVersions": 5,           // 历史版本 cache 保留几版；false/0 关闭
-    "specHint": "./docs/xl-syntax.md"
-  },
-  "harness": {
-    "command": "dsh",             // 可指向绝对路径或 node_modules/.bin/dsh
-    "profile": "headless",        // 一次性任务 profile
-    "json": true,                 // 用 --json 事件流取 final
-    "timeout": 600,
-    "retries": 2,
-    "args": [],                   // 追加到 dsh 之后的参数
-    "env": { "XL_API_KEY": "XL_API_KEY" }   // 把宿主环境变量透传给 harness
+    "cacheVersions": 5,           // 历史版本 cache 保留几版；false / 0 关闭
+    "cacheDir": ".xl",            // 每个语言目录下的 cache 目录名
+    "concurrency": 4,             // 读入但不生效
+    "verify": true,               // 读入但不影响 xl build（只作为 xl_emit 的缺省）
+    "specHint": "./docs/xl-syntax.md"   // 读入但不生效
   },
   "check": {
     "ignore": ["W3011"],          // 忽略的规则码；规则码见 xl-check.md
@@ -284,39 +336,47 @@ $ xl build . -t ts -t csharp --verbose
     "maxWarnings": null           // warning 数量上限；null 不限
   },
   "targets": {
-    "csharp": { "ext": ".cs", "layout": "type", "namespace": "Demo.Generated" },
-    "kotlin": { "ext": ".kt", "layout": "type" }    // 自定义目标：harness 通道
+    "csharp": { "namespace": "Demo.Generated" },       // 读入目标描述符，但当前无人消费
+    "kotlin": { "ext": ".kt" },                        // 自定义目标：单部件
+    "objcpp": {                                        // 自定义目标：多部件
+      "parts": [
+        { "role": "header", "ext": ".h" },
+        { "role": "source", "ext": ".mm", "requires": "bodies", "scope": "definition" }
+      ]
+    }
   }
 }
 ```
 
-* `targets.<lang>.ext` 是自定义目标的**必需**项，缺失即用法错误（退出码 2）。
-* `targets.<lang>.namespace` 覆盖 `# namespace` 到目标语言包 / 命名空间的映射。
-* `harness.env` 只做**转发**：值写宿主环境变量名，`xl` 不读取也不记录其内容，`--verbose` 输出中一律打码。
-* `check` 段只影响 `xl check`（以及 `build` 前的隐式校验）：规则码、级别与退出码见 [`xl-check.md`](./xl-check.md)。
-* `ts` 目标忽略 `harness` 段：直出通道不调用 harness。
+* 自定义目标必须给 `targets.<lang>.ext`（等价于 `parts: [{ "role": "file", "ext": … }]`）或 `parts`；两者都没有是用法错误 `E0004`，退出码 2。`parts` 里 `role` 是部件名（缺省 `part1`、`part2`…，同一目标内唯一），`ext` 必填（可省前导点），`requires` 只认 `"bodies"`，`scope` 只认 `"declaration"` / `"definition"`。
+* `build.naming` 不做取值校验：除 `preserve` 之外的一切写法都按 `idiomatic` 处理（命令行上的 `--naming` 会校验，非法值退出码 2）。
+* `build.header` 只有写 `false` 才关掉产物头；关掉后产物正文之前不再有空行。
+* `build.cacheVersions` 接受数字、`false` / `0`（关闭归档）；其它值（非数字、负数）退回缺省 5，小数向下取整。
+* `targets.<lang>.namespace` 被读入目标描述符，但**本实现没有任何地方消费它**：`# namespace` 到目标语言的映射目前由生成者（agent）自己按提示决定。
+* **不生效的字段**：`build.concurrency`、`build.verify`、`build.specHint`、`build.source`、`targets.<lang>.layout`（解析自定义目标时根本不读它）、`targets.<lang>.model`（模型 id 现在由 agent 在 `xl_emit` 的 `model` 参数里给出）；`harness` 段整体不再被读取。
+* `check` 段影响 `xl check` 与 `xl build` 的隐式校验：规则码、级别与退出码见 [`xl-check.md`](./xl-check.md)。
+* 部署侧的 profile 行配置（`workspaceRoot` / `cacheDir` / `defaultTargets` / `verifyOnEmit`）见 [`../README.md`](../README.md) §5.1；`xl.json` 与 `XL_CACHE_DIR` 的优先级更高。
 
 ---
 
 ## 5. 环境变量
 
-优先级一律是 **CLI 参数 > 环境变量 > `xl.json` > 内置缺省**。
+优先级一律是 **CLI 参数 > 环境变量 > `xl.json` > 内置缺省**——但**环境变量这一级只有 `xl build` 应用**：`XL_TARGET` / `XL_OUT` 在 `xl build` 的入口合并进配置；`xl check`、`xl_plan` / `xl_build` 工具与 `xl_context` / `xl_cache` / `xl_verify` / `xl_emit` 都只读 `xl.json`（`XL_CONFIG` / `XL_CACHE_DIR` 例外，它们在任何入口都生效）。
 
 | 变量 | 作用 |
 | --- | --- |
-| `XL_TARGET` | 缺省 `--target`（逗号分隔，如 `ts,csharp`） |
-| `XL_OUT` | 缺省 `--out` |
-| `XL_HARNESS` / `XL_HARNESS_PROFILE` | 缺省 `--harness` / `--harness-profile` |
-| `XL_TIMEOUT` / `XL_CONCURRENCY` | 缺省 `--timeout` / `--concurrency` |
-| `XL_CONFIG` | 显式指定配置文件路径 |
-| `XL_CACHE_DIR` | 增量缓存与历史版本 cache 的根目录，缺省 `.xl` |
-| `XL_LOG` | `silent` / `error`（等价 `-q`）、`debug`（等价 `--verbose`）、`info`（缺省） |
-| `NO_COLOR` / `FORCE_COLOR` | 标准化关色 / 强制着色 |
-| `XL_API_KEY` 等 harness 密钥 | **不由 `xl` 读取**：由 harness 自己读取，或经 `harness.env` 显式透传（§3.4） |
+| `XL_TARGET` | 缺省 `-t`（逗号分隔，如 `ts,csharp`）；只对 `xl build` 生效 |
+| `XL_OUT` | 缺省 `-o`；只对 `xl build` 生效 |
+| `XL_CONFIG` | 显式指定配置文件路径（不可读或非法时以退出码 1 报错，而不是 2） |
+| `XL_CACHE_DIR` | 增量缓存与历史版本 cache 的根，覆盖 `build.cacheDir`；所有入口都生效 |
+
+> `XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` / `XL_HARNESS`：帮助文本或早期设计里出现过，**本实现不读取**。需要安静输出用 `-q`，需要调试输出用 `--verbose`。
 
 ---
 
 ## 6. 端到端示例
+
+`pkg/demo.xl.md`：
 
 ````md
 # dependencies
@@ -343,6 +403,9 @@ return Math.hypot(a.x - b.x, a.y - b.y);
 ## field x:int = 0
 横坐标。
 
+## field y:int = 0
+纵坐标。
+
 ## method move:(dx:int, dy:int)=>void
 把点移动 (dx, dy)。
 ```ts
@@ -352,16 +415,27 @@ this.y = this.y + dy;
 ````
 
 ```console
-$ xl build . -t ts -o dist
-demo.xl.md -> dist/demo.ts (direct, 1.8ms)
-✔ 1 written
+$ xl build . -t ts
+[ts] pkg/demo.xl.md -> dist/ts/pkg/demo.ts (generated)
+✔ build done in 0.0s — 1 written, 0 skipped, 0 error(s)
 
-$ xl build . -t csharp -o dist
-demo.xl.md -> dist/csharp/{Point,DemoModule}.cs (harness: dsh --profile headless, 9.6s)
-✔ 2 written
+$ xl build . -t csharp
+[csharp] pkg/demo.xl.md -> dist/csharp/pkg/DemoModule.cs, dist/csharp/pkg/Point.cs (planned — missing artifact dist/csharp/pkg/DemoModule.cs) — generate it in a DSH session with the xl_* tools
+✔ build done in 0.0s — 0 written, 0 skipped, 1 planned, 0 error(s)
+planned outputs belong to a DSH session: call xl_context, then xl_emit.
 
-$ xl build . -t csharp --dry-run
-plan: demo.xl.md -> dist/csharp/Point.cs, dist/csharp/DemoModule.cs
-harness: dsh --profile headless --json (prompt 3.1k chars, 1 call)
-(no files written, harness not invoked)
+$ xl build . -t ts --dry-run
+[ts] pkg/demo.xl.md -> dist/ts/pkg/demo.ts (planned — dry run)
+✔ build done in 0.0s — 0 written, 0 skipped, 0 error(s)
+```
+
+计划通道本身就只产计划，所以 `--dry-run` 对它的输出没有影响（原因一栏仍是复用判定的结论）。
+
+计划通道的下一步（在 DSH 会话里）：
+
+```text
+xl_plan   → 确认计划产物路径
+xl_context → 读契约、语言上下文与上一版
+xl_cache  → 取上一版全文（在它之上改而不是重写）
+xl_emit   → 一次提交全部部件；xl 校验、加头、归档、更新 cache
 ```

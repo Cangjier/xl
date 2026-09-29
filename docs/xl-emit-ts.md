@@ -18,13 +18,13 @@
 | --- | --- |
 | 输入 | 一个 `*.xl.md` 的 IR + 原文 |
 | 输出 | 一个 `.ts` 文件；`layout` 恒为 `file`（ts 没有 `type` 布局） |
-| 生成者 | `xl` 内置打印器；**不调用 harness、不联网、不读 provider 配置** |
+| 生成者 | `xl` 内置打印器；**不联网、不调用模型、不读 provider 配置** |
 | 确定性 | 同一 IR 必得同一字节：无时间戳、无随机、无平台相关换行与编码 |
 | 编码 | UTF-8 无 BOM、LF；文件末尾恰好一个换行 |
-| 注释 | 源文件里的说明散文**不进产物**（只作 harness 通道的生成上下文，语法 §1） |
-| 语言覆盖段 | `## <lang>` / `### <lang>` / `#### <lang>` 一律**不进** ts 产物，仅供 harness 通道 |
+| 注释 | 源文件里的说明散文**不进产物**（只作计划通道的生成上下文，语法 §1） |
+| 语言覆盖段 | `## <lang>` / `### <lang>` / `#### <lang>` 一律**不进** ts 产物，只供计划通道（`xl-cli.md` §3.4） |
 
-> `-t ts -t csharp` 同时给出时，ts 部分照旧离线直出；harness 只参与非 ts 目标（`xl-cli.md` §3.4）。
+> `-t ts -t csharp` 同时给出时，ts 部分照旧离线直出并写盘；非 ts 目标只产出计划（`xl-cli.md` §3.4），不落盘、不调用任何模型。
 
 ---
 
@@ -43,12 +43,12 @@
 
 | 段 | 来源 | 规则 |
 | --- | --- | --- |
-| 产物头 3 行 | `xl` 统一追加 | `xl.json` 的 `build.header: false` 时不写；ts 头用 `//`（`xl-cli.md` §3.6） |
+| 产物头 3 行 | `xl` 统一追加 | `xl.json` 的 `build.header: false` 时不写；ts 头用 `//`（`xl-cli.md` §3.6）；ts 头第 2 行只有 `xl:sha256` / `xl:target` / `xl:ver` 三个字段，非 ts 产物另加 `xl:model` 与 `xl:prompt` |
 | 正文 `<1>` | `# dependencies` 的 ```` ```ts ```` 块 | 按块出现顺序拼接，块之间以空行分隔；没有该块则不产生首段 |
 | 正文 `<2>` | 一级声明与 `# statement` | `# type` / `# const` / `# method` / `# enum` / `# interface` / `# class` / `# statement`（§14），**顺序与源文件一致**，不重排、不分组 |
 | 顶层空行 | 打印器 | 相邻两段之间恰好一个空行 |
 
-* `# namespace` 只用于非 ts 目标的包 / 命名空间映射，**不产生 ts 代码**（ts 的模块边界是文件，不是 namespace）。
+* `# namespace` 的名称与说明只作为非 ts 目标的生成上下文（`xl_context` 的 `language.namespace`），**不产生 ts 代码**（ts 的模块边界是文件，不是 namespace）。
 * `# dependencies` 的 ```` ```xl ```` 块（跨文件引用）转成 import（§3）；其余语言子标题下的块被忽略。
 
 ---
@@ -62,7 +62,7 @@
 | ```` ```ts ````（默认语言） | 原样成为产物正文首段（仅做 §11 的最小规范化） |
 | ```` ```xl ```` | 每行 `import { … } from "./x.xl.md"` → 同名相对模块的 import（见下） |
 | 其它 ```` ```<lang> ````（无子标题） | 非法：`# dependencies` 只允许 `ts` 与 `xl` 两种围栏（`xl-check.md` 的 `E1302`） |
-| `## <lang>` 下的块 | 忽略（给 harness 通道） |
+| `## <lang>` 下的块 | 忽略（给计划通道） |
 
 **import 路径改写**：`"./x.xl.md"` → `"./x"`——去掉 `.xl.md` 后缀并省略目标扩展名（ESM / bundler 惯例），`import` / `import type` / 重命名导入都只改模块说明符。
 
@@ -268,7 +268,7 @@ export interface printable {
 | `## readonly field <name>:<T>` | `readonly <name>: <T>;` |
 | `## method <name>:<T>(<参数>)=><返回>` | `<name><T>(<参数>): <返回>;` |
 
-* 接口成员**不写可见性**（ts 接口成员恒为公开），`public` / `private` / `protected` 在 interface 上非法（见 `xl-check.md` 的 `E1202`）。
+* 接口成员**不写可见性**（ts 接口成员恒为公开）。写在上面的 `public` / `private` / `protected` **不会被拒绝**（`xl-check.md` §3.2 C 的实现说明），产物同样忽略它们；`readonly` 只对 `## field` 有意义。
 * 成员之间**不空行**；空接口输出 `export interface x {\n}`。
 * interface 里的 `## method` 必须无函数体；带体会被 `xl-check.md` 的 `E1304` 拒掉。
 
@@ -311,7 +311,7 @@ export interface printable {
 
 规则汇总（由基准样例反推）：
 
-1. **后备字段 `#<name>`**：有初始值、或 getter 没有函数体（含只有 `### set`）时生成；getter 带函数体且无初始值时视为计算属性，不生成后备字段。后备字段行与其后的访问器之间空一行（基准样例的 `#label` 之后即空行）。
+1. **后备字段 `#<name>`**：有初始值、或 getter 没有可直出的函数体（只有 `### set`、getter 是生成器、或没有 `### get`）时生成；getter 带函数体且无初始值时视为计算属性，不生成后备字段。后备字段行与其后的访问器之间空一行（基准样例的 `#label` 之后即空行）。
 2. **访问器只有标题没有代码块** → 合成直通实现：`get` 为 `return this.#<name>;`，`set` 为 `this.#<name> = value;`。
 3. **访问器可见性**：`### private set` / `### protected set` 写进 setter 前；`### get` 的可见性同理；省略即 `public`。
 4. **只有 `### get` 或只有 `### set`**：合法，但 `property` 至少要有一个（否则 `xl-check.md` 的 `E1209`）。
@@ -362,7 +362,7 @@ constructor(x?: number, y?: number) {
 ```
 
 * `constructor` 没有成员名与返回类型标注，产物固定 `constructor(<参数>) { … }`。
-* 可见性写在 `constructor` 之前，产物前一并打印；`static` / `readonly` / `async` 非法（见 `xl-check.md` 的 `E1202`、`E1206`）。
+* 可见性写在 `constructor` 之前，产物前一并打印（没写可见性时保留裸 `constructor(...)`）；`static` / `readonly` 报 `E1202`，返回类型不是 `void` 或一个类里出现多个 `constructor` 报 `E1206`。写成 `## async constructor:…` 之类会掉进未知成员种类（`E1201`）。
 * 类内的 `constructor` 位置与源文件一致，**不**挪到成员首位。
 
 ---
@@ -393,15 +393,21 @@ constructor(x?: number, y?: number) {
 
 1. 行尾 `CRLF` / `CR` → `LF`；去行尾空白。
 2. 去掉首尾空行。
-3. 统一缩进：以块内最小缩进为基准归零，之后每级按 **2 空格**递进；空行保持空行。
+3. 去缩进：以块内最小缩进为基准归零（空行不参与计算）；块内各行的**相对**缩进原样保留。
 4. 块体以外的内容不改一个字符。
+
+打印器把规范化后的块按**位置**缩进，不做重新排版：
+
+* 方法体 / 访问器体 / `# statement` 段：整体再缩进一级（2 空格），包在 `{` / `}` 之间（`# statement` 没有花括号）。
+* 字段 / `# const` 的初始化表达式：首行接在 `= ` 之后，其余行按原相对缩进输出（类成员整体再加一级成员缩进）。
+* 因此「块内每级 2 空格」是**源文件的写法**决定的，不是打印器重排的结果：源里写 4 空格缩进，产物里就是 4 空格。
 
 **体的排布**（`{ … }` 的位置）：
 
 | 体 | 产物 |
 | --- | --- |
 | 有体（多行或复杂表达式） | `头 {` + 缩进体 + `}`（`}` 与声明头同级） |
-| 空体 | `头 {}`（如 interface 之外的无体方法，`xl-check.md` 的 `W3010` 会提示补体） |
+| 空体 | `头 {}`（如 interface 之外的无体方法；本次目标里含非 ts 目标时 `W3010` 会提示补体） |
 | getter 体恰好是 `return this.<name>;` 单行 | 压成一行 `public get score(): number { return this.raw; }` |
 | 其它单行体 | 仍展开成 `{` … `}` 三行 |
 
@@ -464,12 +470,12 @@ export class box<T extends object> extends point implements printable {
 
 | 源构造 | 说明 |
 | --- | --- |
-| `## <lang>` / `### <lang>` / `#### <lang>` | 只进 harness 通道的 prompt（`xl-cli.md` §3.4） |
+| `## <lang>` / `### <lang>` / `#### <lang>` | 只作为计划通道的生成依据（`xl-cli.md` §3.4） |
 | `# namespace` 的名称 | 只影响非 ts 目标的包 / 命名空间（`targets.<lang>.namespace`） |
 | 说明散文 / 成员注释 | 只作生成上下文，**不**转成 tsdoc |
 | `# dependencies` 的 ```` ```xl ```` 块 | 只用于跨文件校验与 import 生成（§3） |
 
-**非 ts 目标（harness 通道）对 ts 侧的要求**：所有可执行成员（方法、访问器、带初始值的字段、构造函数）都应有默认语言（ts）代码块或 `### <lang>` 说明，否则目标语言生成缺依据（`xl-check.md` 的 `W3010`）。`# statement` 同此，只是覆盖段的层级是 `## <lang>`（语法 §16）。
+**非 ts 目标（计划通道）对 ts 侧的要求**：所有可执行成员（方法、访问器、带初始值的字段、构造函数）都应有默认语言（ts）代码块或 `### <lang>` 说明，否则目标语言生成缺依据（`xl-check.md` 的 `W3010`）。`# statement` 同此，只是覆盖段的层级是 `## <lang>`（语法 §16）。
 
 ---
 
@@ -495,7 +501,7 @@ Main(process.argv.slice(2));
 | 多个 `# statement` 段 | 各成一个段落，位置与源文件一致，段间恰好一个空行 |
 | 说明散文 | 不进产物（§1） |
 | `## <lang>` 段 | 不进产物，只作非 ts 通道的生成依据（§13） |
-| 没有默认语言块 | 该段不进产物正文；`ts` 不在目标里时不需要它（`xl-check.md` 的 `W3010`） |
+| 没有默认语言块 | 该段不进产物正文；本次目标里含 `ts` 时提示 `W3010`（那一段会从 ts 产物里整段消失） |
 | 默认语言块里出现静态 `import` / 带 `from` 的 `export` | 提示 `W3013`（`xl-check.md`）：会被提升到产物头之前 |
 
 * 段内没有非空的默认语言块、也没有带代码块的 `## <lang>` 段时，源文件本身就是错的（`xl-check.md` 的 `E1110`）。

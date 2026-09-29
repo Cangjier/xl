@@ -9,7 +9,7 @@
 
 纯 ESM、零依赖、零构建：装进任何 profile 都能直接被 Loader 加载。
 
-`docs/` 下是 xl 语言规范的逐字副本（[语法](docs/xl-syntax.md) · [CLI](docs/xl-cli.md) · [诊断码](docs/xl-check.md) · [ts 产物映射](docs/xl-emit-ts.md) · [验收基准](docs/xl-base-case.md)），加上本插件的[设计说明](docs/design.md)。`pnpm run docs:sync` 检查副本与上游是否漂移。
+`docs/` 下是本实现自己的规范文档（[语法](docs/xl-syntax.md) · [CLI](docs/xl-cli.md) · [诊断码](docs/xl-check.md) · [ts 产物映射](docs/xl-emit-ts.md) · [验收基准](docs/xl-base-case.md)），加上[设计说明](docs/design.md)。改行为就改文档，见 §7。
 
 ---
 
@@ -138,7 +138,7 @@ xl --version | -v                版本
 
 | 选项 | 作用 |
 | --- | --- |
-| `-t, --target <lang>` | 目标语言，可重复；缺省取 `xl.json` 的 `build.target`，再缺省 `ts` |
+| `-t, --target <lang>` | 目标语言，可重复；缺省取行配置的 `defaultTargets`（bundle patch 是 `['ts']`），它优先于 `xl.json` 的 `build.target`，再缺省 `ts`（§9） |
 | `-o, --out <dir>` | 输出根目录；缺省取 `xl.json` 的 `build.out`，再缺省 `dist` |
 | `--flat` | 丢弃源文件相对目录层级 |
 | `--stdout` | 产物正文写标准输出、不落盘 |
@@ -160,6 +160,8 @@ xl --version | -v                版本
 
 `--harness` `--harness-profile` `--timeout` `--retries` `--keep-going` `--concurrency`
 
+另有几个选项在 `xl build` 上**被接受但读取后不使用**：`--strict` / `--max-warnings`（只对 `xl check` 生效）、`--verify` / `--no-verify`（只决定 `xl_emit` 的 `verify` 缺省）、`--color`（没有颜色代码路径，取值会被校验但丢弃）。`XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` 同样不被读取。`XL_TARGET` / `XL_OUT` 只在 `xl build` 上生效，`xl check` 与各 `xl_*` 工具不读它们。
+
 ### 4.4 输出布局
 
 产物一律落在 `<out>/<目标语言>/…`，两种 layout 都保留源文件相对目录。源文件 `pkg/demo.xl.md`，`xl build . -t ts -t csharp -t cpp -t python`：
@@ -177,12 +179,12 @@ dist/
   python/pkg/point.py               # 文件名按 --naming 变换（idiomatic 下 Python / cpp 用 snake_case）
 ```
 
-- 布局是目标的属性，不是调用的属性：`ts` 恒为 `file`，csharp / java / python / go / rust / cpp 与自定义目标恒为 `type`。命令行与工具都没有 layout 参数（§7 第 15 条），`xl.json` 的 `targets.<lang>.layout` 也不再生效（§9）。
-- **`parts` 同样是目标的属性**：一个单元产出几个文件由目标的部件表决定，几乎所有语言只有一项，`cpp` 有两项 —— `header`（`.h`）与 `source`（`.cpp`）。带 `requires: "bodies"` 的部件只在单元确实有可执行内容（有函数体 / 代码块初始值 / `# statement` / 对应语言覆盖段的代码）时才计划：只有 inline 字段的类是 header-only，不会被要求交一个空的 `.cpp`（§7 第 16 条）。这个判定只依赖 IR 与目标名，所以同一份源的计划是确定的。
+- 布局是目标的属性，不是调用的属性：`ts` 恒为 `file`，csharp / java / python / go / rust / cpp 与自定义目标恒为 `type`。命令行与工具都没有 layout 参数（[docs/xl-cli.md](docs/xl-cli.md) §3.5），`xl.json` 的 `targets.<lang>.layout` 根本不会被读取（§9）。
+- **`parts` 同样是目标的属性**：一个单元产出几个文件由目标的部件表决定，几乎所有语言只有一项，`cpp` 有两项 —— `header`（`.h`）与 `source`（`.cpp`）。带 `requires: "bodies"` 的部件只在单元确实有可执行内容（有函数体 / 代码块初始值 / `# statement` / 对应语言覆盖段的代码）时才计划：只有 inline 字段的类是 header-only，不会被要求交一个空的 `.cpp`（[docs/xl-cli.md](docs/xl-cli.md) §3.5）。这个判定只依赖 IR 与目标名，所以同一份源的计划是确定的。
 - 语言目录是计划的产物路径的一部分：`xl_plan` / `xl_context` 报出的路径就是要写的确切路径（每个部件一条，带 `part` 标记），`xl_emit` 只接受这些路径、且一个都不能少。
 - `--flat` 丢弃源文件相对目录，但保留语言目录（`dist/ts/demo.ts`）。
 - 每个语言目录下另有自己的增量 cache：`dist/ts/.xl/`、`dist/csharp/.xl/`（§6）。
-- 未给 `-o` / `build.out` 时 `<out>` 是 `dist`；`docs/xl-cli.md` §3.5 的示例把 `layout=file` 的产物直接画在 `--out` 根下，本实现不这样做，见 §7。
+- 未给 `-o` / `build.out` 时 `<out>` 是 `dist`；`-o` 是相对工作目录的前缀，**不要给绝对路径**（会被拼进工作目录，§9）。
 
 ### 4.5 退出码
 
@@ -192,6 +194,8 @@ dist/
 | 1 | 源文件有 error、输出冲突、写盘失败 |
 | 2 | 用法错误（未知选项 / 未知目标 / 无输入 / 路径不存在） |
 | 3 | 计划通道失败（本插件不返回；由 agent 侧的 `xl_emit` 以 `E4002` 表达） |
+
+`--ignore` 会把码从计数里移除：`--ignore E2002` 之类可以在写盘失败后仍然返回 0；只有计划路径冲突（`E2001`）在冲突阶段无条件返回 1。
 
 ---
 
@@ -231,11 +235,11 @@ dist/
 }
 ```
 
-- 自定义目标给 `ext`（单部件，等价于 `parts: [{ "role": "file", "ext": … }]`）或直接给 `parts`。`parts` 里 `role` 是部件名（缺省 `part1`、`part2`…，同一目标内唯一），`ext` 必填，`requires: "bodies"` 表示"该单元有可执行内容时才计划"，`scope: "definition"` 表示"这个部件只定义部分成员"（见 §7 第 16 条）。声明不成部件表是用法错误（`E0004`，退出码 2）。
+- 自定义目标给 `ext`（单部件，等价于 `parts: [{ "role": "file", "ext": … }]`）或直接给 `parts`。`parts` 里 `role` 是部件名（缺省 `part1`、`part2`…，同一目标内唯一），`ext` 必填，`requires: "bodies"` 表示"该单元有可执行内容时才计划"，`scope: "definition"` 表示"这个部件只定义部分成员"（见 [docs/xl-cli.md](docs/xl-cli.md) §3.5）。声明不成部件表是用法错误（`E0004`，退出码 2）。
 
-优先级一律是 **CLI 参数 > 环境变量（`XL_TARGET` / `XL_OUT` / `XL_CONFIG` / `XL_CACHE_DIR`）> `xl.json` > 内置缺省**。
+- `harness` 段整体不再被读取（没有子进程通道）；`targets.<lang>.model` 虽然被读进目标描述符，但无人消费——模型 id 由 agent 在 `xl_emit` 的 `model` 参数里给出；`targets.<lang>.layout` 则根本不读：自定义目标走计划通道，而计划通道恒为 `type`（§4.4）。
 
-`harness` 段与 `targets.<lang>.model` 不再被读取（没有子进程通道）；`targets.<lang>.model` 现在由 agent 在 `xl_emit` 的 `model` 参数里给出。`targets.<lang>.layout` 同样只是被读过去：自定义目标走 harness 通道，而 harness 通道恒为 `type`（§4.4、§7 第 15 条）。
+优先级一律是 **CLI 参数 > 环境变量（`XL_TARGET` / `XL_OUT` / `XL_CONFIG` / `XL_CACHE_DIR`）> `xl.json` > 内置缺省**；其中 `XL_TARGET` / `XL_OUT` 只在 `xl build` 的入口合并，`XL_CONFIG` / `XL_CACHE_DIR` 在所有入口生效。
 
 ---
 
@@ -258,28 +262,16 @@ dist/
 
 ---
 
-## 7. 与规范文档的差异
+## 7. 规范文档
 
-[`docs/`](docs/) 下的规范副本是唯一事实来源；下面每一条都是文档留有歧义或内部不一致时本实现的选择，写在这里以便审计。行号/章节号都指该副本。
+[`docs/`](docs/) 下的四份 `xl-*.md` 与 `design.md` 现在**描述的就是本实现**（见 [docs/design.md](docs/design.md) §0）：早先它们是与上游 `xlanguage` 仓库逐字同步的副本，靠 `pnpm docs:sync` 比对；该机制已取消——实现行为一变，文档就地更新，因此不再需要「文档 vs 本实现」的差异表。
 
-| # | 位置 | 文档 | 本实现 |
-| --- | --- | --- | --- |
-| 1 | 产物头第 2 行 | `xl-base-case.md` 只画了 `xl:sha256:<key>`；`xl-emit-ts.md` §2 与 `xl-cli.md` §3.6 给的是完整字段表 | 采用完整字段表（两空格分隔），基准样例那一行是示意 |
-| 2 | 访问器单行压缩 | `xl-emit-ts.md` §11 只写了 getter 的 `return this.<name>;` 形状 | 合成访问器（只有标题、无代码块）恒为一行；显式 getter 体为单行且形如 `return this.<成员>;` 时压成一行；显式 setter 体一律展开 |
-| 3 | `layout=type` 的文件名 | §3.5 的例子把接口 `printable` 映射到 `IPrintable.cs`，正文只说 C#/Java/Go 用 PascalCase | `idiomatic` 下 C# / Java 的接口加 `I` 前缀（已有 `I` + 大写开头时不重复加） |
-| 4 | 类下的 `## <lang>` | §16 的语言子标题表里没有 `# class` | 类下的二级标题一律按成员解析；类成员的覆盖段用 `### <lang>`，类级 `## <lang>` 报 `E1201` |
-| 5 | `layout=type` 的模块文件 | §3.4 只说模块级 `# method` / `# const` 合并进 `<源文件基名>Module.<ext>` | `type` / `const` / `method` 三种模块级声明都进该文件（三者都没有目标语言类型名） |
-| 6 | `--flat` 与 `type` 布局 | §3.5 只说「所有产物写到 --out 根」 | `--flat` 在两种布局下都丢弃源文件相对目录（type 布局仍保留目标语言层） |
-| 7 | `W3010` 的适用范围 | §3.3 列举「类 / 接口外的 method、constructor、property 的 get / set、带初始值的 field」 | 对「需要生成依据的可执行成员」触发：模块级 `# method`、类 `## method`、`## constructor`、以及无初始值且访问器无体的 `property`。带内联初始值或代码块的 field 自身已给出依据，不触发 |
-| 13 | `# statement` 的落点 | 语法 §17 / `xl-emit-ts` §14 只规定语法与产物 | 一律按「匿名段」处理：不进 `MODULE_SECTION_KINDS` / `TYPE_SECTION_KINDS`（既不触发也不重置 `E1005`）、不参与 `E1106`、不导出不可 import；`layout=type` 下与 `type` / `const` / `method` 同住模块文件（否则只有 statement 的源文件会计划出 0 个产物），计划里的 `names` 用位置标签 `# statement <n>`；`structureSummary` 只在源文件出现 statement 时多出 `statements` 字段，所以没有 statement 的文件 `xl:prompt` 不变 |
-| 8 | `W3101` | 描述了意图，未给算法 | 只对 ts 依赖块**实际绑定**的名字（`import x` / `import { x as y }`）触发，且 `# dependencies` 里没有该语言段时 |
-| 9 | `--dry-run` 与 `E2001` / `E2003` | §3.6 说 `--dry-run` 时手改只提示；未说冲突 | `--dry-run` 照常报告输出冲突与手改提示，只是不写盘——静默跳过冲突没有价值 |
-| 10 | `xl check` 的命令地位 | `xl-cli.md` 开头说 `xl` 只有 `xl build`，但 `xl-check.md` 定义了 `xl check`，`E0003` 的 help 指向 `xl targets` | 三个命令都实现 |
-| 11 | `E4001` | 定义为 harness 失败 | 不产生：本插件没有子进程通道。计划通道的失败由 `E4002`（`xl_emit` 校验不通过）表达 |
-| 12 | `E1303` | 「同一父标题下语言名重复」 | 实现；重复的语言段被丢弃，只保留第一个 |
-| 14 | 产物布局与增量缓存位置 | §3.5 的示例把 `layout=file` 的产物直接画在 `--out` 根下（`dist/pkg/demo.ts`），只在 `layout=type` 上加目标语言层；§3.6 把缓存画在 `<cwd>/.xl/` | 一律加语言目录：`<out>/<lang>/…`（ts 也在内），增量 cache 随之落在 `<out>/<lang>/.xl/`（§6）；缺省 `out` 随之从「源文件同级」改为 `dist`。这样每个语言的产物与它的 cache 同处一棵树，多个语言不再共用一棵输出树。`docs/` 是上游规范的逐字副本（`pnpm docs:sync` 校验），所以这条有意的差异只记在这里 |
-| 15 | 布局的可选择性 | §3.1 有 `--layout <mode>`，§3.5 按目标给缺省（ts / python / go / rust / 自定义 = `file`），java 强制 `type` | 布局是目标的固定属性，不是调用的选项：`--layout` 与工具的同名参数一并移除（传 `--layout` 现在是未知选项，退出码 2），`ts` 恒为 `file`，其余目标（含自定义目标）恒为 `type`，`xl.json` 的 `targets.<lang>.layout` 被读过去而不生效。生成依据里的 layout 因此只随目标变化，同一份源不可能两次计划出不同的文件集合 |
-| 16 | `cpp`（本实现新增的内置目标） | §3.5 的目标表里没有 `cpp`，也没有任何"一个声明对应多个文件"的语言 | 目标描述符增加 `parts`：`cpp` 声明 `header`（`.h`，`scope: declaration`）与 `source`（`.cpp`，`requires: bodies` + `scope: definition`）两个部件。**一个单元产出几个文件因此是目标的属性**（与第 15 条同构），而"这个单元需不需要 source"只从 IR 判定：`enum` / `interface` / `# type` 只声明不需要，`# statement` 一定需要，其余单元有函数体、代码块初始值或该语言的覆盖段代码就需要。产物文件名沿用 `--naming`：`idiomatic` 下 `cpp` 属 snake_case（`HTTPClient` → `http_client.h`），`preserve` 原样。结构回读校验按 `scope` 分档：声明部件必须提到每个成员，定义部件只要提到它实现的那个类型，并核对它确实写出来的成员的参数个数 —— 否则正确的 `.cpp` 会被"没写全部成员"判错 |
+仍然值得知道的偏差集中在两处：
+
+- [docs/design.md](docs/design.md) §8「已知行为偏差与缺口」：面向维护者（`build.target` 被行配置的 `defaultTargets` 遮住、`--flat` / `naming: preserve` 的计划无法经 `xl_verify` / `xl_emit` 落盘、`--no-cache` 仍写历史归档、绝对 `-o` 不支持等）。
+- 本文 §9「已知限制」：面向使用者。
+
+`docs/xl-base-case.md` 是**冻结的字节级验收基准**：`tests/fixtures/*` 由它抽取（`pnpm fixtures`）。改动它必须重抽 fixture 并一起提交，其余四份文档则随手改。
 
 ---
 
@@ -289,15 +281,16 @@ dist/
 pnpm test          # 等价于 node --test "tests/*.test.js"
 pnpm check         # 入口文件语法检查
 pnpm codes         # 诊断码 → 产生它的模块；有码没人产生就失败
-pnpm docs:sync     # 与上游 xlanguage/docs 比对本仓库的规范副本
 pnpm fixtures      # 从 docs/xl-base-case.md 重抽验收 fixture
 ```
 
-测试里最重要的一条是**字节级一致性**：`tests/fixtures/demo.xl.md` 与 `demo.expected.ts` 直接从 `docs/xl-base-case.md` 抽出来，打印器的输出必须逐字节等于期望产物。规范更新后重新抽取：
+测试里最重要的一条是**字节级一致性**：`tests/fixtures/demo.xl.md` 与 `demo.expected.ts` 直接从 `docs/xl-base-case.md` 抽出来，打印器的输出必须逐字节等于期望产物。基准样例更新后重新抽取：
 
 ```sh
 pnpm fixtures
 ```
+
+`docs/xl-*.md` 描述的是本实现，改行为就改文档（§7）；只有 `docs/xl-base-case.md` 是冻结的验收基准。
 
 ### 目录
 
@@ -305,7 +298,7 @@ pnpm fixtures
 index.js                  bundle 入口：xl 服务 + 模型工具
 cli.js                    xl profile 的应用行入口
 cordis.patch.yml          bundle patch：插入这两行
-docs/                     规范副本（xl-*.md）+ design.md
+docs/                     规范文档（xl-*.md）+ design.md（本实现的事实来源）
 src/core/                 纯核心（解析 / 检查 / ts 打印 / 计划 / cache / 校验）
   parse.js                *.xl.md → IR
   check.js                跨文件与跨目标规则、生成质量提示
@@ -319,7 +312,7 @@ src/plugin/               Host 插件与 CLI
   tools.js                七个模型工具
   cli.js / args.js / console.js
 tests/                    node:test
-scripts/                  extract-fixtures.mjs / verify-docs-sync.mjs / code-map.mjs
+scripts/                  extract-fixtures.mjs / code-map.mjs
 ```
 
 ### 分层
@@ -332,7 +325,14 @@ scripts/                  extract-fixtures.mjs / verify-docs-sync.mjs / code-map
 
 - **写盘绕过 `ctx.fs` 沙箱。** `xl_emit` 与 ts 直出直接用 `node:fs` 写文件，因此不受 profile 的文件沙箱与审批策略约束。这是为了让插件零依赖、可在任意 profile 装载；如果部署需要沙箱，应把 `src/core/artifact.js` 与 `src/core/build.js` 的写盘改成走 `ctx.fs`。
 - **没有子进程通道。** 这是设计目标，不是缺口：非 ts 目标的生成者是会话里的 agent。
-- **未实现的文档能力。** `xl.json` 的 `build.layout` / `build.verify` / `build.source`、`targets.<lang>.namespace`（只被读入描述符，不参与非 ts 提示）、`targets.<lang>.layout`（布局恒为目标的属性）在本实现中不生效；`--concurrency` 不影响结果（ts 打印是同步的）。
-- **`E2003` 依赖 cache。** `--no-cache` 时无法判断产物是否被手改，因此不会报告。
+- **`xl.json` 的 `build.target` 不生效。** 服务层总是把行配置的 `defaultTargets`（bundle patch 是 `['ts']`）当作显式目标传入，它优先于 `build.target`；把该行配置改成 `[]` 才会轮到 `build.target`。要指定目标请用 `-t` 或工具的 `targets` 参数。
+- **`--flat` / `naming: preserve` 的计划无法落盘。** `xl_verify` / `xl_emit` 不接受 `naming` / `flat`（`xl_verify` 也没有 `out`），重新计算的路径与计划不一致，`xl_emit` 会以 `E2001` 拒绝。端到端可用的组合是「不压平 + `xl.json` 的 `naming`」。
+- **`-o` / `build.out` 不支持绝对路径。** 计划路径把该值直接拼在语言目录之前，绝对路径会被拼进工作目录；`../out` 这类相对上跳可用。
+- **`--no-cache` 只跳过 `cache.json`。** 历史版本归档由 `cacheVersions` 单独控制，仍会写入。
+- **`--ignore` 会连同计数一起移除。** `--ignore E2002` 之类可以在写盘失败后仍然返回 0；计划路径冲突（`E2001`）不受影响，仍返回 1。
+- **未实现的文档能力。** `xl.json` 的 `build.layout` / `build.verify` / `build.specHint` / `build.source`、`targets.<lang>.namespace`（只被读入描述符，无人消费）、`targets.<lang>.layout`（布局恒为目标的属性）、`targets.<lang>.model`（模型 id 由 `xl_emit` 的 `model` 参数给出）在本实现中不生效；`--concurrency` 不影响结果（ts 打印是同步的）。`--color` 与 `XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` 不被读取。
+- **`E2003` 依赖 cache。** `--no-cache` 时无法判断产物是否被手改，因此不会报告；`xl_emit` 也不做这项检查。
 - **归档家族是 源 × 扩展名，不是 源 × 产物路径。** `xl_cache` 给的"上一版"是该扩展名最新归档的那一份；`layout=type` 下一个源有多个同扩展名产物时（`Point.cs`、`Box.cs`…），它只保留其中一个的历史。`cpp` 因此每份 `previous` 对应一个部件扩展名，而不是每个类型各一份。
-- **类成员只支持 `### <lang>`。** 见 §7 第 4 条。
+- **类成员只支持 `### <lang>`。** 类级的 `## <lang>` 会被当成成员标题而报 `E1201`（[docs/xl-syntax.md](docs/xl-syntax.md) §16）。
+
+更完整的偏差清单（含位置与修法建议）见 [docs/design.md](docs/design.md) §8。

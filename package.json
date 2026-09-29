@@ -30,7 +30,6 @@
     "test": "node --test \"tests/*.test.js\"",
     "check": "node --check index.js && node --check cli.js",
     "codes": "node scripts/code-map.mjs",
-    "docs:sync": "node scripts/verify-docs-sync.mjs",
     "fixtures": "node scripts/extract-fixtures.mjs"
   },
   "engines": {

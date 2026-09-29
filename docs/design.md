@@ -4,7 +4,7 @@
 
 ## 0. 规范文档在哪里
 
-`docs/xl-*.md` 是 xl 语言规范的**逐字副本**，随本仓库一起发布：
+`docs/` 下的六份文档是**本实现的事实来源**，随本仓库一起发布：
 
 | 文件 | 内容 |
 | --- | --- |
@@ -13,25 +13,25 @@
 | [`xl-check.md`](./xl-check.md) | 诊断码表（级别的唯一事实来源） |
 | [`xl-emit-ts.md`](./xl-emit-ts.md) | ts 直出通道的产物映射 |
 | [`xl-base-case.md`](./xl-base-case.md) | 验收基准：完整输入与逐字节期望产物 |
+| `design.md` | 本文：面向维护者的设计说明 |
 
-**为什么随仓库发布**：验收测试的输入与期望产物直接从 `xl-base-case.md` 抽取，链接也全部指向本目录，因此一个 checkout 就能跑完整门禁，不必同时克隆编译器仓库。
+**为什么以本仓库为准**：验收测试的输入与期望产物直接从 `xl-base-case.md` 抽取，链接也全部指向本目录，因此一个 checkout 就能跑完整门禁，不必同时克隆别的仓库。
 
-**同步**：副本与上游必须逐字节一致。
+**实现与文档必须同时改**：`xl-syntax.md` / `xl-cli.md` / `xl-check.md` / `xl-emit-ts.md` 描述的是本实现的真实行为（包括实现自己的选择与已知偏差），所以代码行为一变，这四份文档就要跟着变；两者不一致时以代码为准，并把文档当成 bug 修掉。可执行的核对手段：
 
 ```sh
-pnpm run docs:sync     # 默认与 ../xlanguage/docs 比对，逐文件报告 in sync / DRIFTED
-pnpm run fixtures      # 从本仓库的 docs/xl-base-case.md 重新抽取验收 fixture
+pnpm test        # tests/conformance.test.js 断言 ts 打印器逐字节等于基准样例
+pnpm fixtures    # 从 docs/xl-base-case.md 重新抽取验收 fixture
+pnpm codes       # 码表里每个码都要有产生它的地方
 ```
 
-`docs:sync` 找不到上游目录时报告 `skipped` 并以 0 退出——没有同仓 checkout 不是失败；只有文件真的漂移才以 1 退出。
-
-**有意的差异不改副本**：本实现与副本不符时，副本保持逐字节一致，差异记在 [`../README.md`](../README.md) §7。例如产物布局：`xl-cli.md` §3.5 只给 `layout=type` 加目标语言层，本实现给每个目标都加（`<out>/<目标语言>/…`），增量 cache 也随之落在 `<out>/<目标语言>/.xl/`。在副本上直接改会让 `docs:sync` 永远报 DRIFTED，差异也就没人看得见了。
+**`xl-base-case.md` 例外，它是冻结的**：验收 fixture 由它生成，因此只在你确实要改字节契约时才动它；改完必须跑 `pnpm fixtures` 并提交重抽后的 `tests/fixtures/*`。`docs/xl-*.md` 曾经是上游 xlanguage 仓库规范的**逐字副本**（用 `pnpm docs:sync` 比对），该机制已取消：文档现在就是本仓库的规范，不再逐字跟随别处。
 
 ---
 
 ## 1. 要解决的问题
 
-`xl-cli.md` §3.4 让 `xl` 自己拼一段 prompt、spawn `dsh --profile headless`、从 `--json` 里取回代码。这条路有三个结构性问题：
+最初的规范设计让 `xl` 自己拼一段 prompt、spawn `dsh --profile headless`、从 `--json` 里取回代码。这条路有三个结构性问题：
 
 1. **xl 必须知道 prompt 长什么样。** prompt 由六段拼成（语法速查、源文件原文、结构摘要、语言上下文、既有实现、任务），任何一段变了都要改 xl 的代码，而它其实是「怎么读文件、怎么用工具」的知识。
 2. **xl 必须自己实现重试、超时、子进程管理、`--json` 解析。** 这些是 DSH 已经有的能力。
@@ -114,7 +114,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | `# statement` 段逐字节进入 ts 产物，且不参与导出与结构校验 | `emit-ts.js` `renderStatement`、`parse.js` `exportedNamesOf`、`verify.js` `verifyStructure` | `tests/conformance.test.js`、`tests/emit-ts.test.js` |
 | 码表里每个码都有产生它的地方 | `scripts/code-map.mjs` | `pnpm run codes` |
 
-`xl:prompt` 的定义值得单独说明：它是 `structureSummary + languageContext + 依赖摘要 + layout + naming` 的哈希，**不含**源文件原文（源文件原文由 `xl:sha256` 表达）。这样「改了注释」不会让非 ts 产物失效，而「改了 `## csharp` 段」会。
+`xl:prompt` 的定义值得单独说明：它是 `structureSummary + languageContext + 依赖摘要 + layout + parts + naming` 的哈希，**不含**源文件原文（源文件原文由 `xl:sha256` 表达）。这样「改了注释」不会让非 ts 产物失效，而「改了 `## csharp` 段」会。
 
 ---
 
@@ -127,7 +127,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 层 | 需要的输入 | 码 |
 | --- | --- | --- |
 | `scan.js` `targets.js` | 路径展开、目标声明 | `E0001` `E0002` `E0003` `E0004` |
-| `source.js` | 文件字节 | `E0005` |
+| `source.js` | 文件字节 | `E0005`（另有读源文件失败的 `E2002`） |
 | `parse.js` | 单个文件的 IR | `E1001`–`E1005`（段落顺序由 `parseXlMd` 主循环判）、`E1006`（只判 `xl` 块的行形态）、`E1101`–`E1103` `E1106` `E1108`–`E1110`、`E1201`–`E1212`、`E1301`–`E1305`、`W3011` `W3012` `W3013` `W3103` |
 | `check.js` | 整个文档 + 依赖索引 + 目标列表 | `E1104` `E1105`（目标解析与接口成员）、`W3010` `W3101` `W3102` `W3104` |
 | `build.js` | 文件系统 | `E1006`（依赖目标读不到或没有该导出）、`E1107`、`E2001` `E2002` `E2003` |
@@ -162,13 +162,34 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 
 | 想做的事 | 改哪里 |
 | --- | --- |
-| 加一个目标语言 | `src/core/targets.js` 的 `BUILTIN_TARGETS`；或在 `xl.json` 的 `targets.<lang>` 里声明 `ext`。自定义目标走 harness 通道，因此布局恒为 `type`，不需要（也不能）声明 layout |
+| 加一个目标语言 | `src/core/targets.js` 的 `BUILTIN_TARGETS`；或在 `xl.json` 的 `targets.<lang>` 里声明 `ext`。自定义目标走计划通道（内部名 `harness`），因此布局恒为 `type`，不需要（也不能）声明 layout |
 | 加一个多文件语言（如 C++ 的头/源） | `src/core/targets.js` 的 `BUILTIN_TARGETS.<lang>.parts`，或在 `targets.<lang>.parts` 里声明部件表：`requires: "bodies"` 让定义部件只在单元有可执行内容时出现，`scope: "definition"` 让结构回读只校验该部件提到的成员。计划、cache、产物头、工具渲染都按 `parts` 自动展开，不需要改其它模块 |
 | 改 ts 打印规则 | `src/core/emit-ts.js`，同时更新 `tests/emit-ts.test.js` 与基准样例的一致性测试 |
 | 加一条诊断码 | `src/core/diagnostics.js` 的 `DIAG_CODES`，在产生它的那一层 emit，补 `tests/parse.test.js` 或 `tests/check.test.js`，再跑 `pnpm run codes` |
 | 让生成者拿到更多上下文 | `src/core/build.js` 的 `languageContext` 与 `src/core/artifact.js` 的 `contextFor`（注意 `promptHash` 的输入要同步，否则 cache 失效判定会失真） |
 | 换掉写盘实现（例如走 `ctx.fs` 沙箱） | `src/core/build.js` 的 `processPlan` 与 `src/core/artifact.js` 的 `emitArtifacts` |
 | 让 `xl build` 自己起 agent | `src/plugin/cli.js` 的 `runBuildCommand`：在 `planned` 分支里改用 `ctx.agents` / `ctx.subagents` 驱动 |
-| 同步上游规范 | `pnpm run docs:sync` 看漂移，重新复制后 `pnpm run fixtures` 重抽验收基准 |
+| 改规范 / 文档 | 直接改 `docs/xl-*.md`（`xl-base-case.md` 除外，它连带验收 fixture）；改完跑 `pnpm test`、`pnpm codes`，动了基准样例再跑 `pnpm fixtures` |
 
 最后一条代码扩展点是刻意留出的：当前选择是「计划通道」，如果将来要回到「xl 自动起 agent」，改动点只在应用行的 `planned` 分支——core、服务、工具都不用动。
+
+---
+
+## 8. 已知行为偏差与缺口
+
+这一节记录**代码当前的真实行为**里不明显、或与常识预期不符的地方；文档（`xl-syntax.md` / `xl-cli.md` / `xl-check.md` / `xl-emit-ts.md`）已经按这些行为撰写，这里是给维护者的「为什么 / 要不要修」清单。
+
+| # | 现象 | 位置 | 备注 |
+| --- | --- | --- | --- |
+| 1 | `xl.json` 的 `build.target` 实际不生效 | `src/plugin/service.js` `cliOf`（`request.targets ?? options.defaultTargets`）+ `cordis.patch.yml` 的 `defaultTargets: ['ts']` | 服务层总是把行配置的 `defaultTargets` 塞进 `cli.targets`，它优先于 `build.target`。`docs/xl-cli.md` §3.1 已按此描述；要恢复 `build.target`，让 `cliOf` 只在请求显式给出 targets 时才设置 |
+| 2 | `--flat` / `naming: preserve` 的计划无法落盘 | `src/plugin/tools.js`：`xl_verify` 无 `out` / `naming` / `flat`，`xl_emit` 无 `naming` / `flat` | 计划路径与 `xl_emit` 重新计算的路径对不上 → `E2001`。端到端可用的组合是「不压平 + `xl.json` 的 `naming`」 |
+| 3 | `--no-cache` 仍会写历史版本归档 | `src/core/cache.js` `archive` 只看 `versions`，不看 `enabled`；`build.js` 的 `cache.archive(...)` 与 `artifact.js` 的 `store.archive(...)` 都无条件调用 | 只有 `cache.json` 真的被跳过 |
+| 4 | `--clean` 近乎空操作 | `src/core/build.js` `processPlan`：只是写盘前 `rmSync` 同一个路径，且在归档之后 | 不清理其它产物、cache 或计划通道 |
+| 5 | `--color` 与 `XL_LOG` / `NO_COLOR` / `FORCE_COLOR` / `XL_TIMEOUT` / `XL_CONCURRENCY` 不生效 | 没有颜色代码路径；`envConfig` 从未被调用 | `--color` 会被校验取值但结果丢弃；`envConfig` 与 `USAGE_CODES` 目前是死代码 |
+| 6 | `--ignore` 可以掩掉产物层失败 | `src/core/build.js` 结尾用 `countBySeverity(diagnostics, ignore)` 重算 | `--ignore E2002` 可能在写盘失败后仍返回 0；计划路径冲突在冲突阶段无条件返回 1 |
+| 7 | 绝对 `-o` / `build.out` 不被支持 | `src/core/plan.js` `outputRoot` 保留绝对字符串，消费者再 `join(cwd, …)` | `C:/x` 会变成 `<cwd>/C:/x/…`；`cacheDir` 则正确处理绝对值 |
+| 8 | `build.naming` 不做取值校验 | `src/core/config.js` | 除 `preserve` 外一律按 `idiomatic`；命令行 `--naming` 才校验 |
+| 9 | `# namespace` 的位置不检查 | `src/core/parse.js` | 只强制「至多一次」；`docs/xl-syntax.md` §0 已写明 |
+| 10 | interface 成员上的可见性 / `static` 修饰符不报 `E1202` | `src/core/parse.js` `parseMember` | interface 只描述签名，产物忽略这些修饰符（`docs/xl-emit-ts.md` §6.2） |
+| 11 | `E1107` 在同一个文件内重复声明类型时也会报 | `src/core/build.js` `crossFileDiagnostics` 统计的是声明次数而非文件数 | 与 `E1106` 同时出现 |
+| 12 | `E4001` 故意不产生 | `scripts/code-map.mjs` 的 `INTENTIONALLY_UNEMITTED` | 没有子进程通道，坏产物由 `E4002` 表达 |
