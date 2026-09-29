@@ -10,11 +10,12 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { cpus } from 'node:os'
+import { outputRoot } from './plan.js'
 
 /** Built-in defaults applied when neither the CLI, the environment, nor the config names a value. */
 export const DEFAULTS = {
   targets: ['ts'],
-  out: null,
+  out: 'dist',
   naming: 'idiomatic',
   concurrency: Math.max(1, Math.min(4, cpus().length || 1)),
   verify: true,
@@ -137,15 +138,30 @@ export function envConfig(env) {
 }
 
 /**
- * Cache root for a working directory.
+ * Cache root for one target language of a working directory.
+ *
+ * The cache lives beside the products it describes: every target gets its own
+ * store under its own language directory (`dist/ts/.xl`, `dist/csharp/.xl`, …),
+ * so one language's incremental state never has to be read to build another.
+ *
+ * `build.cacheDir` / `XL_CACHE_DIR` name the cache directory itself (default
+ * `.xl`). A relative value keeps the language segment in front of it; an
+ * absolute value is used verbatim and is therefore shared by every language,
+ * which stays correct because `cache.json` is keyed by source × target and an
+ * archive file name carries the target's extension.
  * @param {string} cwd - working directory.
  * @param {object} env - environment snapshot.
  * @param {object} config - merged configuration.
+ * @param {object} [location] - where the cache belongs.
+ * @param {string | null} [location.out] - effective output root; `undefined` uses the default root.
+ * @param {string} [location.target] - canonical target language.
  * @returns {string} the absolute cache root.
  */
-export function cacheRoot(cwd, env, config) {
+export function cacheRoot(cwd, env, config, { out, target } = {}) {
   const directory = env.XL_CACHE_DIR ?? config.build?.cacheDir ?? DEFAULTS.cacheDir
-  return isAbsolute(directory) ? directory : resolve(cwd, directory)
+  if (isAbsolute(directory)) return directory
+  const root = outputRoot(out === undefined ? DEFAULTS.out : out)
+  return resolve(cwd, root, target ?? '', directory)
 }
 
 /**

@@ -66,6 +66,12 @@ const FILE_PROPERTY = {
   description: 'Source path relative to the working directory, for example "pkg/demo.xl.md".',
 }
 
+/** JSON Schema for the optional output root shared by the planning tools. */
+const OUT_PROPERTY = {
+  type: 'string',
+  description: 'Output root directory. Defaults to xl.json build.out, then "dist". Every target language gets its own subdirectory, so ts lands in <out>/ts/ and csharp in <out>/csharp/.',
+}
+
 /** Output declaration shared by every tool: a JSON object rendered as text. */
 const TEXT_OUTPUT = {
   schema: { type: 'object', additionalProperties: true },
@@ -101,7 +107,7 @@ function planTool(service) {
           items: { type: 'string' },
           description: 'Target languages, for example ["csharp"]. Defaults to xl.json build.target, then ts.',
         },
-        out: { type: 'string', description: 'Output root directory.' },
+        out: OUT_PROPERTY,
         layout: { type: 'string', enum: ['file', 'type'], description: 'file emits one file per source; type emits one file per declaration.' },
         naming: { type: 'string', enum: ['idiomatic', 'preserve'], description: 'Target-language naming policy for type-layout file names.' },
         flat: { type: 'boolean', description: 'Discard the source directory hierarchy in output paths.' },
@@ -143,7 +149,7 @@ function contextTool(service) {
       properties: {
         file: FILE_PROPERTY,
         target: { type: 'string', description: 'Target language, for example "csharp".' },
-        out: { type: 'string', description: 'Output root directory.' },
+        out: OUT_PROPERTY,
         layout: { type: 'string', enum: ['file', 'type'], description: 'Layout override.' },
         naming: { type: 'string', enum: ['idiomatic', 'preserve'], description: 'Naming policy override.' },
         flat: { type: 'boolean', description: 'Discard the source directory hierarchy.' },
@@ -190,7 +196,7 @@ function cacheTool(service) {
       properties: {
         file: FILE_PROPERTY,
         target: { type: 'string', description: 'Target language.' },
-        out: { type: 'string', description: 'Output root directory.' },
+        out: OUT_PROPERTY,
         cwd: CWD_PROPERTY,
       },
       required: ['file', 'target'],
@@ -270,7 +276,7 @@ function emitTool(service) {
         model: { type: 'string', description: 'Model id stamped into the artifact header as xl:model.' },
         force: { type: 'boolean', description: 'Overwrite an existing non-xl file at a planned path.' },
         verify: { type: 'boolean', description: 'Verify before writing. Defaults to true.' },
-        out: { type: 'string', description: 'Output root directory.' },
+        out: OUT_PROPERTY,
         cwd: CWD_PROPERTY,
       },
       required: ['file', 'target', 'files'],
@@ -355,7 +361,7 @@ function buildTool(service) {
       properties: {
         paths: { type: 'array', items: { type: 'string' }, description: 'Files, directories, or globs.' },
         targets: { type: 'array', items: { type: 'string' }, description: 'Target languages.' },
-        out: { type: 'string', description: 'Output root directory.' },
+        out: OUT_PROPERTY,
         layout: { type: 'string', enum: ['file', 'type'], description: 'Layout override.' },
         naming: { type: 'string', enum: ['idiomatic', 'preserve'], description: 'Naming policy override.' },
         flat: { type: 'boolean', description: 'Discard the source directory hierarchy.' },

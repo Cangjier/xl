@@ -3,10 +3,13 @@
  * planned paths collide (xl-cli §3.5).
  *
  * The layout rule, stated once: the effective output root is `--out`, then
- * `build.out`, then the working directory. A `file`-layout target keeps the
- * source's relative directory under that root; a `type`-layout target adds the
- * target-language segment in front of it and emits one file per type plus one
- * module file for the module-level declarations.
+ * `build.out`, then `dist`. Every target then gets its own language directory
+ * under that root — `dist/ts`, `dist/csharp`, … — so two languages never share
+ * a tree and each one's cache sits beside the products it describes. A
+ * `file`-layout target keeps the source's relative directory under its
+ * language directory and emits one file per source; a `type`-layout target
+ * emits one file per type plus one module file for the module-level
+ * declarations.
  *
  * @module xl/core/plan
  */
@@ -105,6 +108,7 @@ export function planSource(doc, sourceRel, target, options) {
   const root = outputRoot(options.out)
   const directory = sourceDirectory(sourceRel, options.flat === true)
   const base = sourceBaseName(sourceRel)
+  const targetRoot = joinPath([root, target.name])
 
   if (layout !== LAYOUT_TYPE) {
     return {
@@ -114,7 +118,7 @@ export function planSource(doc, sourceRel, target, options) {
       layout: 'file',
       ext: target.ext,
       outputs: [{
-        path: joinPath([root, directory, `${base}${target.ext}`]),
+        path: joinPath([targetRoot, directory, `${base}${target.ext}`]),
         base,
         kind: 'file',
         names: declaredNames(doc.decls),
@@ -122,7 +126,6 @@ export function planSource(doc, sourceRel, target, options) {
     }
   }
 
-  const targetRoot = joinPath([root, target.name])
   const outputs = []
   const moduleDecls = doc.decls.filter(decl => MODULE_KINDS.has(decl.kind))
   const moduleNames = declaredNames(moduleDecls)

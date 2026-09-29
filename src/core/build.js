@@ -15,7 +15,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { BuildCache } from './cache.js'
+import { BuildCacheSet } from './cache.js'
 import { cacheRoot, loadConfig, resolveBuildOptions } from './config.js'
 import { checkDeclaredTargets, checkDocument } from './check.js'
 import { countBySeverity, dedupeDiagnostics, diag, sortDiagnostics } from './diagnostics.js'
@@ -197,7 +197,7 @@ function crossFileDiagnostics(prepared) {
  * @param {object} input - planning input.
  * @param {readonly object[]} input.targets - resolved target descriptors.
  * @param {object} input.options - resolved build options.
- * @param {BuildCache} [input.cache] - the cache store, used to report reuse.
+ * @param {BuildCacheSet} [input.cache] - the per-language cache stores, used to report reuse.
  * @param {string} [input.cwd] - working directory for the reuse decision.
  * @returns {object[]} one plan per source × target.
  */
@@ -216,7 +216,7 @@ export function planWorkspace(prepared, { targets, options, cache, cwd }) {
       plan.context = languageContext(entry.doc, target, prepared, entry.src)
       plan.fingerprint = fingerprintSource(entry.text)
       plan.reuse = reuseDecision({ cwd: cwd ?? prepared.cwd, plan, target, fingerprint: plan.fingerprint, force: options.force === true })
-      const previous = cache?.latestArchive(entry.src, target.ext) ?? null
+      const previous = cache?.for(target).latestArchive(entry.src, target.ext) ?? null
       if (previous !== null) plan.previous = { version: previous.version, path: previous.path }
       plans.push(plan)
     }
@@ -395,8 +395,12 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
     return result
   }
 
-  const cache = new BuildCache({ cwd, root: cacheRoot(cwd, env, config), versions: options.cacheVersions })
-  if (!options.noCache) cache.load()
+  const cache = new BuildCacheSet({
+    cwd,
+    versions: options.cacheVersions,
+    enabled: !options.noCache,
+    rootOf: name => cacheRoot(cwd, env, config, { out: options.out, target: name }),
+  })
   const plans = planWorkspace(prepared, { targets, options, cache, cwd })
   result.plans = plans
 
@@ -427,7 +431,7 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
     const target = targets.find(item => item.name === plan.target)
     if (target === undefined) continue
     const record = processPlan({
-      cwd, plan, target, entry, options, cache, result,
+      cwd, plan, target, entry, options, cache: cache.for(plan.target), result,
     })
     result.files.push(record)
   }
@@ -439,7 +443,7 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
       const written = outputs.flatMap(file => file.out)
       if (written.length === 0) continue
       const content = written.map(path => readArtifact(join(cwd, path))).join('\u0000')
-      cache.set(plan.src, plan.target, {
+      cache.for(plan.target).set(plan.src, plan.target, {
         fingerprint: plan.fingerprint,
         out: written,
         outHash: fingerprintSource(content),
@@ -667,8 +671,11 @@ export function runPlan(input) {
   if (counts.errors > 0) {
     return { ok: false, cwd, plans: [], diagnostics, errors: counts.errors, warnings: counts.warnings, exitCode: 1 }
   }
-  const cache = new BuildCache({ cwd, root: cacheRoot(cwd, env, loaded.config), versions: options.cacheVersions })
-  cache.load()
+  const cache = new BuildCacheSet({
+    cwd,
+    versions: options.cacheVersions,
+    rootOf: name => cacheRoot(cwd, env, loaded.config, { out: options.out, target: name }),
+  })
   const plans = planWorkspace(prepared, { targets, options, cache, cwd })
   return {
     ok: true,

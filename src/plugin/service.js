@@ -28,7 +28,7 @@ import {
  * @param {string | null} [options.workspaceRoot] - default working directory for requests that name none.
  * @param {readonly string[]} [options.defaultTargets] - targets used when neither the request nor `xl.json` names one.
  * @param {boolean} [options.verifyOnEmit] - whether `emit` verifies before writing when the caller is silent.
- * @param {string} [options.cacheDir] - cache root override; `xl.json` and `XL_CACHE_DIR` still win.
+ * @param {string} [options.cacheDir] - cache directory placed under each language directory; `xl.json` and `XL_CACHE_DIR` still win.
  * @returns {object} the service.
  */
 export function createXlService(options = {}) {

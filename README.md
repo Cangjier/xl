@@ -137,7 +137,7 @@ xl --version | -v                版本
 | 选项 | 作用 |
 | --- | --- |
 | `-t, --target <lang>` | 目标语言，可重复；缺省取 `xl.json` 的 `build.target`，再缺省 `ts` |
-| `-o, --out <dir>` | 输出根目录 |
+| `-o, --out <dir>` | 输出根目录；缺省取 `xl.json` 的 `build.out`，再缺省 `dist` |
 | `--layout <mode>` | `file` \| `type`（缺省按目标；ts 恒为 `file`） |
 | `--flat` | 丢弃源文件相对目录层级 |
 | `--stdout` | 产物正文写标准输出、不落盘 |
@@ -159,7 +159,24 @@ xl --version | -v                版本
 
 `--harness` `--harness-profile` `--timeout` `--retries` `--keep-going` `--concurrency`
 
-### 4.4 退出码
+### 4.4 输出布局
+
+产物一律落在 `<out>/<目标语言>/…`，两种 layout 都保留源文件相对目录。源文件 `pkg/demo.xl.md`，`xl build . -t ts -t csharp -t python`：
+
+```text
+dist/
+  ts/pkg/demo.ts                  # layout=file：一个源文件一个产物
+  csharp/pkg/DemoModule.cs        # layout=type：模块级 # method / # const 合并到这里
+  csharp/pkg/Point.cs             # layout=type：每个类型各成一文件
+  python/pkg/demo.py              # layout=file 的其它语言同样带语言目录
+```
+
+- 语言目录是计划的产物路径的一部分：`xl_plan` / `xl_context` 报出的路径就是要写的确切路径，`xl_emit` 只接受这些路径。
+- `--flat` 丢弃源文件相对目录，但保留语言目录（`dist/ts/demo.ts`）。
+- 每个语言目录下另有自己的增量 cache：`dist/ts/.xl/`、`dist/csharp/.xl/`（§6）。
+- 未给 `-o` / `build.out` 时 `<out>` 是 `dist`；`docs/xl-cli.md` §3.5 的示例把 `layout=file` 的产物直接画在 `--out` 根下，本实现不这样做，见 §7。
+
+### 4.5 退出码
 
 | 码 | 含义 |
 | --- | --- |
@@ -179,7 +196,7 @@ xl --version | -v                版本
   name: 'xl'
   config:
     workspaceRoot: null      # 工具缺省的工作目录；null 用进程 cwd
-    cacheDir: '.xl'          # cache 根目录；xl.json 与 XL_CACHE_DIR 优先级更高
+    cacheDir: '.xl'          # 每个语言目录下的 cache 目录名（缺省即 dist/<lang>/.xl）；xl.json 与 XL_CACHE_DIR 优先级更高
     defaultTargets: ['ts']   # 请求未给 targets 且 xl.json 也没有时的缺省
     verifyOnEmit: true       # xl_emit 未显式给 verify 时是否先校验
 ```
@@ -210,8 +227,10 @@ xl --version | -v                版本
 
 | 路径 | 内容 |
 | --- | --- |
-| `.xl/cache.json` | 每个 源 × 目标 的源指纹、产物路径、产物内容哈希、model、prompt hash |
-| `.xl/cache/<镜像源路径>.<扩展名>.<N>` | 最近 N 版产物（缺省 5，`build.cacheVersions` 为 `false`/`0` 时关闭） |
+| `<out>/<目标语言>/.xl/cache.json` | 每个 源 × 目标 的源指纹、产物路径、产物内容哈希、model、prompt hash |
+| `<out>/<目标语言>/.xl/cache/<镜像源路径>.<扩展名>.<N>` | 最近 N 版产物（缺省 5，`build.cacheVersions` 为 `false`/`0` 时关闭） |
+
+缺省 `<out>` 是 `dist`，所以 ts 的存储是 `dist/ts/.xl/`、csharp 的是 `dist/csharp/.xl/`：每个语言一份独立存储，互不读取。`build.cacheDir` / `XL_CACHE_DIR` 给的是该目录名（缺省 `.xl`）——相对值放在语言目录之下，绝对值原样使用（此时所有语言共享一份存储，仍然正确：`cache.json` 按 源 × 目标 分键，归档文件名带目标扩展名）。仅仅**计划**某个语言（`xl_plan` / `xl_context`，或 `xl build -t <其它语言>`）不会建出该目录：没有任何 源 × 目标 被记录时 cache 不落盘。
 
 - **复用判定**：计划中的每个产物都存在、带 xl 头、`xl:target` 是本目标、`xl:sha256` 等于当前源指纹 → 跳过。
 - **归档**：覆盖前把被覆盖的那一份存为下一序号；最新一版就是 `xl_cache` / `xl_context` 给出的「上一版」，用来在它之上改而不是重写。
@@ -238,6 +257,7 @@ xl --version | -v                版本
 | 10 | `xl check` 的命令地位 | `xl-cli.md` 开头说 `xl` 只有 `xl build`，但 `xl-check.md` 定义了 `xl check`，`E0003` 的 help 指向 `xl targets` | 三个命令都实现 |
 | 11 | `E4001` | 定义为 harness 失败 | 不产生：本插件没有子进程通道。计划通道的失败由 `E4002`（`xl_emit` 校验不通过）表达 |
 | 12 | `E1303` | 「同一父标题下语言名重复」 | 实现；重复的语言段被丢弃，只保留第一个 |
+| 14 | 产物布局与增量缓存位置 | §3.5 的示例把 `layout=file` 的产物直接画在 `--out` 根下（`dist/pkg/demo.ts`），只在 `layout=type` 上加目标语言层；§3.6 把缓存画在 `<cwd>/.xl/` | 一律加语言目录：`<out>/<lang>/…`（ts 也在内），增量 cache 随之落在 `<out>/<lang>/.xl/`（§6）；缺省 `out` 随之从「源文件同级」改为 `dist`。这样每个语言的产物与它的 cache 同处一棵树，多个语言不再共用一棵输出树。`docs/` 是上游规范的逐字副本（`pnpm docs:sync` 校验），所以这条有意的差异只记在这里 |
 
 ---
 
@@ -269,7 +289,7 @@ src/core/                 纯核心（解析 / 检查 / ts 打印 / 计划 / cac
   check.js                跨文件与跨目标规则、生成质量提示
   emit-ts.js              ts 直出打印器（确定性）
   plan.js                 输出路径与冲突
-  cache.js                cache.json 与历史版本归档
+  cache.js                每个目标语言的 cache.json 与历史版本归档
   artifact.js             计划通道的三个操作：context / verify / emit
   build.js                扫描 → 解析 → 检查 → 计划 → 产出
 src/plugin/               Host 插件与 CLI

@@ -19,9 +19,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { BuildCache } from './cache.js'
+import { BuildCacheSet } from './cache.js'
 import { checkWorkspace, languageContext, planWorkspace, prepareWorkspace } from './build.js'
-import { cacheRoot } from './config.js'
+import { cacheRoot, DEFAULTS } from './config.js'
 import { countBySeverity, diag } from './diagnostics.js'
 import { XL_VERSION } from './emit-ts.js'
 import {
@@ -69,7 +69,7 @@ export function resolveArtifactRequest({ cwd, target, options = {}, config = {} 
     target: descriptor,
     config,
     options: {
-      out: options.out ?? config.build?.out ?? null,
+      out: options.out ?? config.build?.out ?? DEFAULTS.out,
       flat: options.flat === true,
       layout: resolveLayout(descriptor, options.layout),
       naming: options.naming ?? config.build?.naming ?? 'idiomatic',
@@ -100,7 +100,7 @@ export function contextFor({ cwd, source, target, options = {}, config = {}, env
   const cache = openCache({ cwd, config, env, options: resolved.options })
   const plans = planWorkspace(prepared, { targets: [resolved.target], options: resolved.options, cache, cwd })
   const plan = plans[0]
-  const previous = resolved.options.noCache ? null : cache.latestArchive(source, resolved.target.ext)
+  const previous = resolved.options.noCache ? null : cache.for(resolved.target).latestArchive(source, resolved.target.ext)
   const context = {
     source,
     target: resolved.target.name,
@@ -134,22 +134,21 @@ export function contextFor({ cwd, source, target, options = {}, config = {}, env
 }
 
 /**
- * Open the cache store for a working directory.
+ * Open the per-language cache stores for a working directory.
  * @param {object} input - the request.
  * @param {string} input.cwd - working directory.
  * @param {object} input.config - merged configuration.
  * @param {object} input.env - environment snapshot.
  * @param {object} input.options - resolved build options.
- * @returns {BuildCache} the loaded cache.
+ * @returns {BuildCacheSet} the stores, opened lazily per target language.
  */
 function openCache({ cwd, config, env, options }) {
-  const cache = new BuildCache({
+  return new BuildCacheSet({
     cwd,
-    root: cacheRoot(cwd, env, config),
     versions: options.cacheVersions ?? 5,
+    enabled: options.noCache !== true,
+    rootOf: name => cacheRoot(cwd, env, config, { out: options.out, target: name }),
   })
-  if (options.noCache !== true) cache.load()
-  return cache
 }
 
 /**
@@ -235,6 +234,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
 
   const fingerprint = fingerprintSource(entry.text)
   const cache = openCache({ cwd, config, env, options: resolved.options })
+  const store = cache.for(resolved.target)
   const diagnostics = []
   const written = []
   const skipped = []
@@ -275,7 +275,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
       skipped.push(output.path)
       continue
     }
-    if (cache.versions > 0) cache.archive(source, output.path)
+    if (store.versions > 0) store.archive(source, output.path)
     const header = resolved.options.header
       ? `${renderHeader({
         sourcePath: source,
@@ -305,14 +305,14 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
   }
 
   if (written.length === planned.length && resolved.options.noCache !== true) {
-    cache.set(source, resolved.target.name, {
+    store.set(source, resolved.target.name, {
       fingerprint,
       out: written,
       outHash: fingerprintArtifact(written.map(path => readText(join(cwd, path))).join('\u0000')),
       ...model === undefined ? {} : { model },
       promptHash: context.promptHash,
     })
-    cache.save()
+    store.save()
   }
 
   const counts = countBySeverity(diagnostics)

@@ -45,20 +45,29 @@ function doc() {
   return parsed.doc
 }
 
-test('file layout keeps the source directory and swaps the suffix', () => {
+test('every target gets its own language directory under the output root', () => {
+  const ts = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', naming: 'idiomatic' })
+  const python = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('python', {}), { out: 'dist', naming: 'idiomatic' })
+  const csharp = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('csharp', {}), { out: 'dist', naming: 'idiomatic' })
+  assert.deepEqual(ts.outputs.map(output => output.path), ['dist/ts/pkg/demo.ts'])
+  assert.deepEqual(python.outputs.map(output => output.path), ['dist/python/pkg/demo.py'])
+  assert.equal(csharp.outputs.every(output => output.path.startsWith('dist/csharp/')), true)
+})
+
+test('file layout keeps the source directory under the language directory', () => {
   const plan = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', naming: 'idiomatic' })
   assert.equal(plan.layout, 'file')
-  assert.deepEqual(plan.outputs.map(output => output.path), ['dist/pkg/demo.ts'])
+  assert.deepEqual(plan.outputs.map(output => output.path), ['dist/ts/pkg/demo.ts'])
 })
 
-test('file layout without --out writes beside the source', () => {
+test('with no output root the language directory is the whole prefix', () => {
   const plan = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('python', {}), { out: null, naming: 'idiomatic' })
-  assert.deepEqual(plan.outputs.map(output => output.path), ['pkg/demo.py'])
+  assert.deepEqual(plan.outputs.map(output => output.path), ['python/pkg/demo.py'])
 })
 
-test('--flat drops the source directory', () => {
+test('--flat drops the source directory but keeps the language directory', () => {
   const plan = planSource(doc(), 'pkg/deep/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', flat: true, naming: 'idiomatic' })
-  assert.deepEqual(plan.outputs.map(output => output.path), ['dist/demo.ts'])
+  assert.deepEqual(plan.outputs.map(output => output.path), ['dist/ts/demo.ts'])
 })
 
 test('type layout emits one file per type plus one module file', () => {
@@ -117,7 +126,7 @@ test('two sources that plan the same path are a conflict', () => {
   const second = planSource(doc(), 'pkg/demo.xl.md', resolveTarget('ts', {}), { out: 'dist', naming: 'idiomatic' })
   const conflicts = detectConflicts([first, second])
   assert.equal(conflicts.length, 1)
-  assert.equal(conflicts[0].path, 'dist/pkg/demo.ts')
+  assert.equal(conflicts[0].path, 'dist/ts/pkg/demo.ts')
   assert.equal(conflicts[0].owners.length, 2)
 })
 

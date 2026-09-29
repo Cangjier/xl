@@ -222,7 +222,7 @@ export const HELP_TEXT = `xl ${XL_CLI_VERSION} — xl-md (*.xl.md) compiler
 
 build 选项:
   -t, --target <lang>       目标语言，可重复（-t ts -t csharp）；缺省取 xl.json 的 build.target，再缺省 ts
-  -o, --out <dir>           输出根目录（缺省：源文件同级目录，或 xl.json 的 build.out）
+  -o, --out <dir>           输出根目录（缺省：xl.json 的 build.out，再缺省 dist）；每个目标语言各用自己的子目录，即 <out>/<lang>/…
   --layout <mode>           file | type（缺省按目标）
   --flat                    丢弃源文件相对目录层级
   --stdout                  产物正文写标准输出、不落盘

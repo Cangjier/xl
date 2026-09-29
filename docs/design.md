@@ -25,6 +25,8 @@ pnpm run fixtures      # 从本仓库的 docs/xl-base-case.md 重新抽取验收
 
 `docs:sync` 找不到上游目录时报告 `skipped` 并以 0 退出——没有同仓 checkout 不是失败；只有文件真的漂移才以 1 退出。
 
+**有意的差异不改副本**：本实现与副本不符时，副本保持逐字节一致，差异记在 [`../README.md`](../README.md) §7。例如产物布局：`xl-cli.md` §3.5 只给 `layout=type` 加目标语言层，本实现给每个目标都加（`<out>/<目标语言>/…`），增量 cache 也随之落在 `<out>/<目标语言>/.xl/`。在副本上直接改会让 `docs:sync` 永远报 DRIFTED，差异也就没人看得见了。
+
 ---
 
 ## 1. 要解决的问题
@@ -105,6 +107,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 没有 `--force` 时不覆盖非 xl 产物 | `build.js` / `artifact.js` | `tests/build.test.js`、`tests/artifact.test.js` |
 | 结构不符的产物绝不落盘 | `verify.js` + `artifact.js` | `tests/artifact.test.js` |
 | 覆盖前把旧产物归档，只保留最近 N 版 | `cache.js` | `tests/artifact.test.js` |
+| 产物与它的增量 cache 同处 `<out>/<目标语言>/`，语言之间不共享目录，且只计划不落盘不留缓存 | `plan.js` 的语言目录、`config.js` `cacheRoot`、`cache.js` `BuildCacheSet` | `tests/plan.test.js`、`tests/build.test.js` |
 | 计划外的路径一律拒绝 | `artifact.js` `emitArtifacts` | `tests/artifact.test.js` |
 | `# statement` 段逐字节进入 ts 产物，且不参与导出与结构校验 | `emit-ts.js` `renderStatement`、`parse.js` `exportedNamesOf`、`verify.js` `verifyStructure` | `tests/conformance.test.js`、`tests/emit-ts.test.js` |
 | 码表里每个码都有产生它的地方 | `scripts/code-map.mjs` | `pnpm run codes` |

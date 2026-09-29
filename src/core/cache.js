@@ -10,6 +10,10 @@
  *   version is what the non-ts channel offers as "the implementation to build
  *   on", so a different version is a different generation input.
  *
+ * There is one cache root per target language (`dist/ts/.xl`, `dist/csharp/.xl`,
+ * …), so a whole-workspace build opens a {@link BuildCacheSet}; an operation
+ * that already knows its target opens a single {@link BuildCache}.
+ *
  * @module xl/core/cache
  */
 
@@ -31,7 +35,7 @@ export class BuildCache {
   /**
    * @param {object} options - store locations.
    * @param {string} options.cwd - working directory the invocation resolves against.
-   * @param {string} options.root - absolute cache root, normally `<cwd>/.xl`.
+   * @param {string} options.root - absolute cache root, normally `<out>/<lang>/.xl`.
    * @param {number} options.versions - how many historical versions to keep; `0` disables the archive.
    */
   constructor({ cwd, root, versions }) {
@@ -42,6 +46,8 @@ export class BuildCache {
     this.archiveRoot = join(root, 'cache')
     /** @type {Record<string, object>} */
     this.entries = {}
+    /** Whether anything was recorded since the load; an untouched store is not written. */
+    this.changed = false
   }
 
   /**
@@ -87,6 +93,7 @@ export class BuildCache {
       ...value,
       at: new Date().toISOString(),
     }
+    this.changed = true
   }
 
   /**
@@ -97,14 +104,20 @@ export class BuildCache {
    */
   forget(src, target) {
     delete this.entries[`${src}${KEY_SEPARATOR}${target}`]
+    this.changed = true
   }
 
   /**
-   * Write the cache document. Failure is contained: an unwritable cache must
-   * not fail a build that already produced correct artifacts.
+   * Write the cache document.
+   *
+   * A store that recorded nothing since it was opened writes nothing: merely
+   * planning a language must not leave a cache directory behind. Failure is
+   * contained: an unwritable cache must not fail a build that already produced
+   * correct artifacts.
    * @returns {void}
    */
   save() {
+    if (!this.changed) return
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       writeFileSync(this.file, `${JSON.stringify({ version: CACHE_FORMAT, entries: this.entries }, null, 2)}\n`, 'utf8')
@@ -238,6 +251,59 @@ export class BuildCache {
         // A missing historical file is already the intended state.
       }
     }
+  }
+}
+
+/**
+ * One build's cache stores, one per target language.
+ *
+ * A store is memoized by its *resolved* root rather than by language name, so
+ * an absolute `XL_CACHE_DIR` / `build.cacheDir` that every language resolves to
+ * yields one shared store instead of several writers overwriting each other's
+ * `cache.json`.
+ */
+export class BuildCacheSet {
+  /**
+   * @param {object} options - store locations.
+   * @param {string} options.cwd - working directory.
+   * @param {number} options.versions - historical versions kept per language.
+   * @param {(lang: string) => string} options.rootOf - absolute cache root for one language.
+   * @param {boolean} [options.enabled] - whether the stores read and write at all.
+   */
+  constructor({ cwd, versions, rootOf, enabled = true }) {
+    this.cwd = cwd
+    this.versions = versions
+    this.rootOf = rootOf
+    this.enabled = enabled
+    /** @type {Map<string, BuildCache>} */
+    this.stores = new Map()
+  }
+
+  /**
+   * The store for one target language, opened and loaded on first use.
+   * @param {string | object} target - canonical language name or target descriptor.
+   * @returns {BuildCache} the store.
+   */
+  for(target) {
+    const name = typeof target === 'string' ? target : target.name
+    const root = this.rootOf(name)
+    let store = this.stores.get(root)
+    if (store === undefined) {
+      store = new BuildCache({ cwd: this.cwd, root, versions: this.versions })
+      if (this.enabled) store.load()
+      this.stores.set(root, store)
+    }
+    return store
+  }
+
+  /**
+   * Write every store that was opened. Failure stays contained, exactly as it
+   * is for one store.
+   * @returns {void}
+   */
+  save() {
+    if (!this.enabled) return
+    for (const store of this.stores.values()) store.save()
   }
 }
 

@@ -9,7 +9,7 @@
  * @module xl/core
  */
 
-export { BuildCache } from './cache.js'
+export { BuildCache, BuildCacheSet } from './cache.js'
 export {
   contextFor,
   emitArtifacts,
