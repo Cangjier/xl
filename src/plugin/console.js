@@ -154,3 +154,15 @@ export function fileLine(file) {
   const reason = file.reason === null || file.reason === undefined ? '' : ` — ${file.reason}`
   return `[${file.target}] ${file.src} -> ${file.out.join(', ')} (${file.status}${reason})`
 }
+
+/**
+ * Render one residue record as a console line.
+ * @param {object} orphan - the residue record.
+ * @returns {string} the line.
+ */
+export function orphanLine(orphan) {
+  const source = orphan.source === null || orphan.source === undefined ? '(unknown source)' : orphan.source
+  const target = orphan.target === null || orphan.target === undefined ? '' : ` [${orphan.target}]`
+  const state = orphan.exists === false ? ' (product already gone)' : ''
+  return `${orphan.out}${target} ← ${source}${state}`
+}

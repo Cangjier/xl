@@ -215,6 +215,9 @@ export function resolveBuildOptions({ config, cli }) {
     clean: cli.clean === true,
     dryRun: cli.dryRun === true,
     stdout: cli.stdout === true,
+    // Residue detection is on by default: a deleted source leaves a product that
+    // nothing else in a run can notice. `--no-orphans` turns the scan off.
+    orphans: cli.orphans !== false,
   }
 }
 

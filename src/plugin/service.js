@@ -18,6 +18,7 @@ import {
   loadConfig,
   runBuild,
   runCheck,
+  runOrphans,
   runPlan,
   verifyArtifacts,
 } from '../core/index.js'
@@ -78,6 +79,9 @@ export function createXlService(options = {}) {
       cache: request.cache !== false,
       stdout: request.stdout === true,
       clean: request.clean === true,
+      // Residue detection is on unless the caller asks for it off; `xl_orphans`
+      // and `xl check` share this switch with `xl build`.
+      orphans: request.orphans !== false,
     }
     if (Array.isArray(request.targets) && request.targets.length > 0) cli.targets = request.targets
     else if (!hasConfiguredTargets(config) && !hasEnvTargets() && Array.isArray(options.defaultTargets) && options.defaultTargets.length > 0) {
@@ -140,6 +144,23 @@ export function createXlService(options = {}) {
     build(request = {}) {
       const cwd = cwdOf(request.cwd)
       return runBuild({ cwd, paths: request.paths ?? [], cli: cliOf(request, configFor(cwd).config) })
+    },
+
+    /**
+     * Report the residue under the output root: every product whose `*.xl.md`
+     * source no longer exists. With `prune`, exactly those products are removed
+     * — never a file that does not carry an xl header.
+     * @param {object} [request] - the request.
+     * @param {string} [request.cwd] - working directory.
+     * @param {string} [request.out] - output root.
+     * @param {boolean} [request.prune] - remove what was found.
+     * @returns {object} the report.
+     */
+    orphans(request = {}) {
+      const cwd = cwdOf(request.cwd)
+      const cli = cliOf(request, configFor(cwd).config)
+      if (request.prune === true) cli.prune = true
+      return runOrphans({ cwd, cli })
     },
 
     /**

@@ -8,8 +8,12 @@
  * The tool set is deliberately small. `xl_plan` and `xl_context` are how an
  * agent learns what to produce; `xl_emit` is how it commits a product and gets
  * the header, fingerprint, archive, and cache record for free; `xl_cache`,
- * `xl_verify`, `xl_check`, and `xl_build` are the remaining standardized
- * operations, exposed one per operation rather than one per option.
+ * `xl_verify`, `xl_check`, `xl_build`, and `xl_orphans` are the remaining
+ * standardized operations, exposed one per operation rather than one per option.
+ *
+ * `xl_orphans` is the one tool that looks at the output tree from the opposite
+ * side: it reports the products whose source was deleted, which is the residue
+ * every other operation is blind to by construction.
  *
  * @module xl/plugin/tools
  */
@@ -28,6 +32,7 @@ export const TOOL_NAMES = [
   'xl_emit',
   'xl_check',
   'xl_build',
+  'xl_orphans',
 ]
 
 /** Plugin root, resolved from this module so a `link:` install still finds the guides. */
@@ -83,6 +88,7 @@ function toolDefinitions(service) {
     emitTool(service),
     checkTool(service),
     buildTool(service),
+    orphansTool(service),
   ]
 }
 
@@ -280,6 +286,7 @@ function verifyTool(service) {
       'Check proposed products against the structural contract without writing anything: the type set, the member',
       'names, and parameter counts must match the *.xl.md. Call it before xl_emit when you want the verdict',
       'separately; xl_emit verifies as part of writing.',
+      'Each entry carries content, or from naming a disk file to read — the same two forms xl_emit accepts.',
       'Pass the same out / naming / flat values the plan was made with, or the planned paths will not match.',
     ].join(' '),
     parameters: {
@@ -299,7 +306,13 @@ function verifyTool(service) {
     output: TEXT_OUTPUT,
     async execute(args) {
       const result = service.verify({ ...args, source: args.file })
-      return { text: renderVerify(result), ok: result.ok, issues: result.issues, planned: result.planned }
+      return {
+        text: renderVerify(result),
+        ok: result.ok,
+        issues: result.issues,
+        planned: result.planned,
+        warnings: (result.warnings ?? []).map(item => ({ code: item.code, msg: item.msg })),
+      }
     },
   }
 }
@@ -318,6 +331,10 @@ function emitTool(service) {
       'archive the version it replaced, and update the incremental cache.',
       'Supply one entry per planned output with the exact path xl_plan or xl_context returned. Supply the code only;',
       'xl adds the header.',
+      'The code goes in files[].content, or files[].from names a file on the disk that already holds it — write the',
+      'product with your own write tool and submit the path instead of repeating the whole file in this call. A from',
+      'file may be the planned output path itself, or a scratch file; an @generated header it carries is stripped and',
+      're-rendered with this run\'s fingerprint, so edit the body and let xl own the header.',
       'Pass the same out / naming / flat values the plan was made with, or the planned paths will not match.',
     ].join(' '),
     parameters: {
@@ -345,6 +362,7 @@ function emitTool(service) {
         ok: result.ok,
         written: result.written,
         skipped: result.skipped,
+        adopted: result.adopted,
         planned: result.planned,
         fingerprint: result.fingerprint,
         promptHash: result.promptHash,
@@ -367,7 +385,8 @@ function checkTool(service) {
   return {
     name: 'xl_check',
     description: [
-      'Run the xl static checks over *.xl.md sources and report diagnostics with their rule codes.',
+      'Run the xl static checks over *.xl.md sources and report diagnostics with their rule codes. It also reports',
+      'E2004 for every output whose source was deleted (see xl_orphans), unless orphans is false.',
       'Use it before generating so a syntax or structure error is found by the checker instead of by a mismatch',
       'during xl_emit.',
     ].join(' '),
@@ -376,9 +395,10 @@ function checkTool(service) {
       properties: {
         paths: { type: 'array', items: { type: 'string' }, description: 'Files, directories, or globs.' },
         targets: { type: 'array', items: { type: 'string' }, description: 'Targets the generation-quality hints are reported for.' },
-        ignore: { type: 'array', items: { type: 'string' }, description: 'Rule codes to ignore, for example ["W3102"].' },
+        ignore: { type: 'array', items: { type: 'string' }, description: 'Rule codes to ignore, for example ["W3011"].' },
         strict: { type: 'boolean', description: 'Treat warnings as failures.' },
         maxWarnings: { type: 'number', description: 'Fail when more than this many warnings are reported.' },
+        orphans: { type: 'boolean', description: 'Scan the output root for residue (E2004). Defaults to true.' },
         cwd: CWD_PROPERTY,
       },
       additionalProperties: false,
@@ -390,6 +410,7 @@ function checkTool(service) {
         text: renderCheck(result),
         ok: result.ok,
         files: result.files,
+        orphans: (result.orphans ?? []).map(orphan => orphan.out),
         errors: result.errors,
         warnings: result.warnings,
         exitCode: result.exitCode,
@@ -410,6 +431,8 @@ function buildTool(service) {
       'Run the xl build. The ts target is produced here, deterministically and offline. Every other target is',
       'planned only: this tool never calls a model, because generation belongs to you. Run it after xl_emit so the',
       'report reflects the files you wrote.',
+      'The report also names the residue under the output root (E2004: products whose source was deleted), unless',
+      'orphans is false. Use xl_orphans to inspect it and xl_orphans with prune to remove it.',
     ].join(' '),
     parameters: {
       type: 'object',
@@ -421,6 +444,7 @@ function buildTool(service) {
         flat: { type: 'boolean', description: 'Discard the source directory hierarchy.' },
         force: { type: 'boolean', description: 'Regenerate even when the fingerprint already matches.' },
         dryRun: { type: 'boolean', description: 'Report the plan without writing anything.' },
+        orphans: { type: 'boolean', description: 'Scan the output root for residue (E2004). Defaults to true.' },
         cwd: CWD_PROPERTY,
       },
       additionalProperties: false,
@@ -435,6 +459,7 @@ function buildTool(service) {
         written: result.written,
         skipped: result.skipped,
         planned: result.planned,
+        orphans: (result.orphans ?? []).map(orphan => orphan.out),
         errors: result.errors,
         warnings: result.warnings,
         files: result.files,
@@ -443,17 +468,71 @@ function buildTool(service) {
   }
 }
 
-/** JSON Schema for the `files` property, shared by `xl_verify` and `xl_emit`. */
+/**
+ * The `xl_orphans` tool.
+ * @param {object} service - the `xl` service.
+ * @returns {object} the tool definition.
+ */
+function orphansTool(service) {
+  return {
+    name: 'xl_orphans',
+    description: [
+      'Report residue: every output under the output root whose *.xl.md source no longer exists. Deleting a source',
+      'is invisible to every other xl operation — nothing plans it any more, so its products keep sitting in',
+      '<out>/<lang>/ and are still picked up by the language toolchain and by a publish step. This is the operation',
+      'that notices, by reading the @generated header of each product and the per-language cache.',
+      'Detection only: nothing is deleted unless prune is true, and even then only a file that still carries an xl',
+      'header is removed. xl_check and xl_build already report the same residue as warning E2004.',
+    ].join(' '),
+    parameters: {
+      type: 'object',
+      properties: {
+        out: OUT_PROPERTY,
+        prune: {
+          type: 'boolean',
+          description: 'Delete the residue instead of only reporting it. A file that no longer carries an xl header is refused, never removed.',
+        },
+        cwd: CWD_PROPERTY,
+      },
+      additionalProperties: false,
+    },
+    output: TEXT_OUTPUT,
+    async execute(args) {
+      const result = service.orphans(args)
+      return {
+        text: renderOrphans(result),
+        ok: result.ok,
+        exitCode: result.exitCode,
+        orphans: result.orphans,
+        removed: result.removed,
+        refused: result.refused,
+      }
+    },
+  }
+}
+
+/**
+ * JSON Schema for the `files` property, shared by `xl_verify` and `xl_emit`.
+ *
+ * One entry per planned output, and exactly one of the two content forms:
+ * `content` inline (the caller already holds the text) or `from` (a path on the
+ * disk `xl` reads, which is how a generator that wrote the product straight to
+ * its output path submits it without repeating the whole file in the tool call).
+ */
 const FILES_PROPERTY = {
   type: 'array',
-  description: 'One entry per planned output: the exact path and the generated code.',
+  description: 'One entry per planned output: the exact path and the generated code, given either inline as content or as the path of a file on disk in from (exactly one of the two).',
   items: {
     type: 'object',
     properties: {
       path: { type: 'string', description: 'Planned output path, exactly as xl_plan or xl_context reported it.' },
-      content: { type: 'string', description: 'Generated code for that file, without the xl header.' },
+      content: { type: 'string', description: 'Generated code for that file, without the xl header. Give this or from, not both.' },
+      from: {
+        type: 'string',
+        description: 'Path of a local file holding the generated code, absolute or relative to cwd. An @generated header it carries is stripped and re-rendered, so the file may be the output path itself or a scratch file written by the caller.',
+      },
     },
-    required: ['path', 'content'],
+    required: ['path'],
     additionalProperties: false,
   },
 }
@@ -614,7 +693,14 @@ export function renderCache(record) {
  * @returns {string} the rendered text.
  */
 export function renderVerify(result) {
-  if (result.ok) return `xl verify: ok — every proposed file matches the structural contract.\nplanned: ${result.planned.join(', ')}`
+  const warnings = (result.warnings ?? []).map(item => `warning[${item.code}] ${item.msg}`)
+  if (result.ok) {
+    return [
+      'xl verify: ok — every proposed file matches the structural contract.',
+      ...warnings,
+      `planned: ${result.planned.join(', ')}`,
+    ].join('\n')
+  }
   const lines = ['xl verify: mismatch']
   for (const entry of result.issues) {
     lines.push(`- ${entry.path}`)
@@ -623,6 +709,7 @@ export function renderVerify(result) {
   for (const path of result.unexpected) {
     lines.push(`- "${path}" is not a planned output`)
   }
+  lines.push(...warnings)
   lines.push(`planned: ${result.planned.join(', ')}`)
   return lines.join('\n')
 }
@@ -636,6 +723,7 @@ export function renderEmit(result) {
   const lines = [result.ok ? 'xl emit: ok' : 'xl emit: failed']
   if (result.written.length > 0) lines.push(`written: ${result.written.join(', ')}`)
   if (result.skipped.length > 0) lines.push(`skipped: ${result.skipped.join(', ')}`)
+  if ((result.adopted ?? []).length > 0) lines.push(`accepted from disk: ${result.adopted.join(', ')}`)
   if (result.fingerprint !== undefined) lines.push(`fingerprint: ${result.fingerprint}`)
   if (result.promptHash !== undefined) lines.push(`context hash: ${result.promptHash}`)
   for (const item of result.diagnostics) {
@@ -658,6 +746,7 @@ export function renderCheck(result) {
     lines.push(`${item.file}:${item.line}:${item.col}: ${item.severity}[${item.code}]: ${item.msg}`)
     if (item.help !== undefined) lines.push(`  help: ${item.help}`)
   }
+  appendOrphans(lines, result.orphans ?? [])
   return lines.join('\n')
 }
 
@@ -676,9 +765,49 @@ export function renderBuild(result) {
   for (const item of result.diagnostics) {
     lines.push(`${item.file}:${item.line}: ${item.severity}[${item.code}]: ${item.msg}`)
   }
+  appendOrphans(lines, result.orphans ?? [])
   if (result.planned > 0) {
     lines.push('')
     lines.push('The planned outputs above are yours to generate: call xl_context for each source and target, then xl_emit.')
   }
   return lines.join('\n')
+}
+
+/**
+ * Render the residue of a run for the model.
+ * @param {object} result - the `orphans` result.
+ * @returns {string} the rendered text.
+ */
+export function renderOrphans(result) {
+  const head = result.pruned
+    ? `xl orphans — ${result.orphans.length} found, ${result.removed.length} removed`
+    : `xl orphans — ${result.orphans.length} found`
+  const lines = [head]
+  if (result.orphans.length === 0) {
+    lines.push(`nothing under ${result.out} was generated from a source that no longer exists.`)
+    return lines.join('\n')
+  }
+  for (const orphan of result.orphans) {
+    const target = orphan.target === null ? '' : ` [${orphan.target}]`
+    const state = orphan.exists ? '' : ' (product already gone)'
+    lines.push(`- ${orphan.out}${target} ← ${orphan.source}${state} (via ${orphan.found})`)
+  }
+  for (const path of result.removed) lines.push(`removed ${path}`)
+  for (const path of result.refused) lines.push(`refused ${path}: it no longer carries an xl header`)
+  if (!result.pruned) lines.push('Call xl_orphans with prune: true to remove exactly these files.')
+  return lines.join('\n')
+}
+
+/**
+ * Append the residue summary to a rendered report.
+ * @param {string[]} lines - the report lines being built.
+ * @param {readonly object[]} orphans - the residue.
+ * @returns {void}
+ */
+function appendOrphans(lines, orphans) {
+  if (orphans.length === 0) return
+  lines.push('')
+  lines.push(`${orphans.length} orphaned output(s) — the source they were generated from no longer exists:`)
+  for (const orphan of orphans) lines.push(`- ${orphan.out} ← ${orphan.source}`)
+  lines.push('Call xl_orphans (with prune: true to remove them) once you have confirmed the deletion was intended.')
 }

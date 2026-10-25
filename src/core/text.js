@@ -265,8 +265,7 @@ export function indentLines(lines, level) {
 
 /**
  * The prose between a heading line and the next heading, with fenced code
- * removed. Used as the member's generation context and as the emptiness test
- * for `W3102`/`W3103`.
+ * removed. Used as the member's generation context.
  * @param {readonly string[]} lines - the owning section's body lines.
  * @returns {string} trimmed prose, possibly empty.
  */

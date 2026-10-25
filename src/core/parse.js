@@ -555,7 +555,6 @@ function parseNamespace(node, ctx, spec) {
       : `# namespace name "${name}" is not an identifier`)
   }
   const prose = proseOf(node.bodyLines)
-  if (prose === '') emit(ctx, 'W3103', node.line, '# namespace has no description')
   warnProseOnlySections(sections, ctx)
   return { line: node.line, name, prose, sections }
 }

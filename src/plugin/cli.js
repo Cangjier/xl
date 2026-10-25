@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { USAGE_CODES } from '../core/diagnostics.js'
-import { createWriter, fileLine, planLine } from './console.js'
+import { createWriter, fileLine, orphanLine, planLine } from './console.js'
 import { HELP_TEXT, USAGE_TEXT, XL_CLI_VERSION, parseArgs, validateOptions } from './args.js'
 
 /** Stable Cordis plugin name. */
@@ -153,6 +153,8 @@ async function dispatch(ctx, parsed, writer, io) {
   switch (parsed.command) {
     case 'check':
       return runCheckCommand(service, request, writer)
+    case 'orphans':
+      return runOrphansCommand(service, request, writer, parsed.options)
     case 'targets':
       return runTargetsCommand(service, request, writer, io)
     default:
@@ -204,6 +206,8 @@ function requestOf(parsed) {
   if (options.stdout === true) request.stdout = true
   if (options.clean === true) request.clean = true
   if (options.strict === true) request.strict = true
+  if (options.prune === true) request.prune = true
+  if (options.orphans === false) request.orphans = false
   if (typeof options.maxWarnings === 'number') request.maxWarnings = options.maxWarnings
   if (Array.isArray(options.ignore)) request.ignore = options.ignore
   if (options.verify === false) request.verify = false
@@ -230,12 +234,72 @@ function runCheckCommand(service, request, writer) {
   writer.event('check.end', {
     ok: result.ok,
     files: result.files,
+    orphans: (result.orphans ?? []).length,
     errors: result.errors,
     warnings: result.warnings,
   })
   if (!writer.ndjson) {
     const mark = writer.paint(result.ok ? '✔' : '✖', result.ok ? 'ok' : 'error')
     writer.info(`${mark} ${result.errors} error(s), ${result.warnings} warning(s) in ${result.files} file(s)`)
+    reportOrphans(writer, result.orphans ?? [])
+  }
+  return result.exitCode
+}
+
+/**
+ * Report the residue of a run under the summary line.
+ * @param {object} writer - the console writer.
+ * @param {readonly object[]} orphans - the residue records.
+ * @returns {void}
+ */
+function reportOrphans(writer, orphans) {
+  if (orphans.length === 0) return
+  writer.warn(`${orphans.length} orphaned output(s): their *.xl.md source no longer exists (E2004)`)
+  for (const orphan of orphans) writer.warn(`  ${orphanLine(orphan)}`)
+  writer.warn('  run `xl orphans --prune` to remove them, or restore the sources and regenerate')
+}
+
+/**
+ * Run `xl orphans`.
+ * @param {object} service - the `xl` service.
+ * @param {object} request - the request.
+ * @param {object} writer - the console writer.
+ * @param {object} options - the parsed options, used to report a dry run.
+ * @returns {number} the exit code.
+ */
+function runOrphansCommand(service, request, writer, options) {
+  const result = service.orphans(request)
+  for (const orphan of result.orphans) {
+    writer.event('orphan', {
+      out: orphan.out,
+      source: orphan.source,
+      target: orphan.target,
+      found: orphan.found,
+      exists: orphan.exists,
+    })
+    writer.info(orphanLine(orphan))
+  }
+  for (const path of result.removed) writer.info(`removed ${path}`)
+  for (const path of result.refused) writer.warn(`refused to remove ${path}: it no longer carries an xl header`)
+  if (result.pruned && options.dryRun === true) {
+    writer.debug('--dry-run: nothing was removed')
+  }
+  writer.event('orphans.end', {
+    out: result.out,
+    orphans: result.orphans.length,
+    pruned: result.pruned,
+    removed: result.removed.length,
+    refused: result.refused.length,
+  })
+  if (!writer.ndjson) {
+    const mark = writer.paint(result.ok ? '✔' : '✖', result.ok ? 'ok' : 'error')
+    if (result.orphans.length === 0) {
+      writer.info(`${mark} no orphaned output under ${result.out}`)
+      return result.exitCode
+    }
+    const verb = result.pruned ? 'removed' : 'found'
+    writer.info(`${mark} ${result.orphans.length} orphaned output(s) ${verb} under ${result.out}`)
+    if (!result.pruned) writer.info('run `xl orphans --prune` to remove them')
   }
   return result.exitCode
 }
@@ -332,6 +396,7 @@ function runBuildCommand(service, request, writer, io, options) {
     written: result.written,
     skipped: result.skipped,
     planned: result.planned,
+    orphans: (result.orphans ?? []).length,
     warnings: result.warnings,
     errors: result.errors,
     ms: result.ms,
@@ -342,6 +407,7 @@ function runBuildCommand(service, request, writer, io, options) {
     parts.push(`${result.errors} error(s)`)
     const mark = writer.paint(result.ok ? '✔' : '✖', result.ok ? 'ok' : 'error')
     writer.info(`${mark} build done in ${(result.ms / 1000).toFixed(1)}s — ${parts.join(', ')}`)
+    reportOrphans(writer, result.orphans ?? [])
     if (result.planned > 0) {
       writer.info('planned outputs belong to a DSH session: call xl_context, then xl_emit.')
     }

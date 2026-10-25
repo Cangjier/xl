@@ -6,9 +6,10 @@
  */
 
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
+import { runBuild } from '../src/core/build.js'
 import { apply, internals, name, inject } from '../src/plugin/cli.js'
 import { createXlService } from '../src/plugin/service.js'
 import { parseArgs, validateOptions } from '../src/plugin/args.js'
@@ -38,11 +39,11 @@ test('parseArgs separates the command, the paths, and the options', () => {
 })
 
 test('parseArgs accepts --name=value and short flags', () => {
-  const parsed = parseArgs(['check', '--format=compact', '-q', '--ignore', 'W3102,W3011'])
+  const parsed = parseArgs(['check', '--format=compact', '-q', '--ignore', 'W3011,W3012'])
   assert.equal(parsed.command, 'check')
   assert.equal(parsed.options.format, 'compact')
   assert.equal(parsed.options.quiet, true)
-  assert.deepEqual(parsed.options.ignore, ['W3102', 'W3011'])
+  assert.deepEqual(parsed.options.ignore, ['W3011', 'W3012'])
 })
 
 test('parseArgs stops option scanning at --', () => {
@@ -247,7 +248,7 @@ test('xl check reports diagnostics and exits 1 on an error', async () => {
 })
 
 test('xl check --strict turns a warning into a failure', async () => {
-  const source = ['# class point', '', '## field x:int = 0', ''].join('\n')
+  const source = ['# method tick:()=>int', 'tick.', '', '```ts', '```', ''].join('\n')
   const cwd = makeWorkspace({ 'demo.xl.md': source })
   try {
     const lenient = await runCli(['check'], cwd)
@@ -352,6 +353,115 @@ test('a harness-era option is accepted and reported as unused under --verbose', 
     assert.equal(verbose.code, 0)
     assert.ok(verbose.stderr.includes('--harness accepted but unused'))
     dropWorkspace(cwd2)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+/**
+ * Build a workspace, then delete one source so its product becomes residue.
+ * @returns {string} the workspace root.
+ */
+function workspaceWithResidue() {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO, 'other.xl.md': '# class box\n' })
+  const built = runBuild({ cwd, paths: ['demo.xl.md', 'other.xl.md'], cli: { targets: ['ts'] }, env: {} })
+  assert.equal(built.exitCode, 0)
+  rmSync(join(cwd, 'demo.xl.md'))
+  return cwd
+}
+
+test('xl orphans reports the residue and exits 1 without deleting anything', async () => {
+  const cwd = workspaceWithResidue()
+  try {
+    const result = await runCli(['orphans'], cwd)
+    assert.equal(result.code, 1)
+    assert.ok(result.stdout.includes('dist/ts/demo.ts'))
+    assert.ok(result.stdout.includes('demo.xl.md'))
+    assert.ok(result.stdout.includes('--prune'))
+    assert.equal(existsSync(join(cwd, 'dist', 'ts', 'demo.ts')), true)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl orphans --prune removes exactly the residue and then reports clean', async () => {
+  const cwd = workspaceWithResidue()
+  try {
+    const pruned = await runCli(['orphans', '--prune'], cwd)
+    assert.equal(pruned.code, 0)
+    assert.ok(pruned.stdout.includes('removed dist/ts/demo.ts'))
+    assert.equal(existsSync(join(cwd, 'dist', 'ts', 'demo.ts')), false)
+    assert.equal(existsSync(join(cwd, 'dist', 'ts', 'other.ts')), true)
+
+    const after = await runCli(['orphans'], cwd)
+    assert.equal(after.code, 0)
+    assert.ok(after.stdout.includes('no orphaned output'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl orphans --dry-run reports the residue without removing it', async () => {
+  const cwd = workspaceWithResidue()
+  try {
+    const result = await runCli(['orphans', '--prune', '--dry-run'], cwd)
+    assert.equal(result.code, 1)
+    assert.equal(existsSync(join(cwd, 'dist', 'ts', 'demo.ts')), true)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl orphans --json emits one event per residue record', async () => {
+  const cwd = workspaceWithResidue()
+  try {
+    const result = await runCli(['orphans', '--json'], cwd)
+    const events = result.stdout.trim().split('\n').map(line => JSON.parse(line))
+    assert.deepEqual(events.map(event => event.ev), ['orphan', 'orphans.end'])
+    assert.equal(events[0].out, 'dist/ts/demo.ts')
+    assert.equal(events[0].source, 'demo.xl.md')
+    assert.equal(events[0].target, 'ts')
+    assert.equal(events[0].found, 'header')
+    assert.equal(events[1].orphans, 1)
+    assert.equal(events[1].pruned, false)
+    assert.equal(result.code, 1)
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl check and xl build report residue as E2004, and --no-orphans waives it', async () => {
+  const cwd = workspaceWithResidue()
+  try {
+    const checked = await runCli(['check'], cwd)
+    assert.equal(checked.code, 0)
+    assert.ok(checked.stderr.includes('warning[E2004]'))
+    assert.ok(checked.stderr.includes('1 orphaned output(s)'))
+    assert.ok(checked.stderr.includes('--prune'))
+
+    const waived = await runCli(['check', '--no-orphans'], cwd)
+    assert.equal(waived.code, 0)
+    assert.ok(!waived.stderr.includes('E2004'))
+
+    const built = await runCli(['build', '-t', 'ts', 'other.xl.md'], cwd)
+    assert.equal(built.code, 0)
+    assert.ok(built.stderr.includes('warning[E2004]'))
+    assert.ok(built.stderr.includes('1 orphaned output(s)'))
+  } finally {
+    dropWorkspace(cwd)
+  }
+})
+
+test('xl orphans accepts an empty workspace and a --help that documents it', async () => {
+  const cwd = makeWorkspace({ 'demo.xl.md': DEMO })
+  try {
+    const empty = await runCli(['orphans'], cwd)
+    assert.equal(empty.code, 0)
+    assert.ok(empty.stdout.includes('no orphaned output'))
+
+    const help = await runCli(['--help'], cwd)
+    assert.ok(help.stdout.includes('xl orphans [options]'))
+    assert.ok(help.stdout.includes('--prune'))
   } finally {
     dropWorkspace(cwd)
   }

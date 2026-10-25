@@ -72,6 +72,7 @@ export const DIAG_CODES = {
   E2001: { severity: 'error', help: '去掉 --flat、改名，或加 --force；xl 绝不静默覆盖' },
   E2002: { severity: 'error', help: '检查 --out 权限与磁盘状态' },
   E2003: { severity: 'warning', help: '不要手改产物；改动写回 *.xl.md' },
+  E2004: { severity: 'warning', help: '确认源文件确实被删后跑 `xl orphans --prune` 清掉残留产物，或恢复源文件重新生成' },
 
   // ── W3xxx generation-quality hints ───────────────────────────────────────
   W3010: { severity: 'warning', help: '补一个 ts 默认语言代码块，或加 ### <target> / ## <target> 指示' },
@@ -79,13 +80,17 @@ export const DIAG_CODES = {
   W3012: { severity: 'warning', help: '补内容，或删除该代码块' },
   W3013: { severity: 'warning', help: '把依赖写进 # dependencies，默认语言块里只留可执行语句' },
   W3101: { severity: 'warning', help: '在 # dependencies 的 ## <lang> 段说明该依赖的来源' },
-  W3102: { severity: 'warning', help: '补一句用途说明：它会进生成上下文，并成为产出代码注释' },
-  W3103: { severity: 'warning', help: '补包用途说明，供非 ts 目标生成使用' },
   W3104: { severity: 'warning', help: '只为确实需要人工指示的目标补 ## <lang> 段；不需要时用 --ignore W3104' },
 
   // ── E4xxx non-ts generation channel ──────────────────────────────────────
   E4001: { severity: 'error', help: '查看 dsh 会话日志与 profile 组合' },
   E4002: { severity: 'error', help: '收敛生成上下文（补 ## <lang> 指示），或放宽该目标的校验' },
+  E4003: { severity: 'error', help: '检查 files[].from 的路径与读权限，或改成直接给 files[].content' },
+  E4004: { severity: 'error', help: '一个部件只有一份内容：files 项里 content 与 from 恰好给一个' },
+  E4005: { severity: 'error', help: '补 files[].content（正文），或补 files[].from（磁盘上的正文文件）' },
+
+  // ── W4xxx non-ts submission layer ────────────────────────────────────────
+  W4001: { severity: 'warning', help: '提交的是正文，xl 每次都按本次源指纹重写 @generated 头；把改动写回 *.xl.md' },
 }
 
 /** Codes that are usage errors: they exit 2 and never enter diagnostic counting. */

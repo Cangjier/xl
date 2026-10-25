@@ -21,7 +21,7 @@
 | 代码块 | `ts` 块是行为说明；`### cpp` / `#### cpp` / `## cpp` 块是**可直接采用的实现**（§12） |
 | 手工添加 | 不许发明 IR 里没有的公开 API；内部辅助（`namespace {}` 里的函数、私有 `static` 成员）必须私有、且只服务于 IR 里已有的成员 |
 | 确定性 | 同一 IR + 同一上下文应得到同一份代码：不写时间戳、随机名、机器相关路径；换行 LF；文件末尾恰好一个换行 |
-| 编码 | UTF-8 无 BOM；产物头与指纹由 `xl_emit` 统一追加（[`../README.md`](../README.md) §3.2），**生成者不要自己写 `@generated` 头** |
+| 编码 | UTF-8 无 BOM；产物头与指纹由 `xl_emit` 统一追加（[`../README.md`](../README.md) §3.2），**生成者不要自己写 `@generated` 头**（用 `files[].from` 就地提交时例外：那份文件本来就带着上次的头，`xl_emit` 会剥掉它再按本次提交重写，见 [`xl-cli.md`](./xl-cli.md) §3.4） |
 | 构建文件 | **也由生成者负责**：`<out>/cpp/CMakeLists.txt` 是常驻文件，`xl` **不**计划它、**不**校验它、**不**覆盖它；构建树必须落在 `<out>/cpp/build/` 之内（§11） |
 
 ---
@@ -744,6 +744,7 @@ C++ 侧没有字节契约，目标是**可读且与源文件顺序一致**：
 * 只写声明、把定义放 `.cpp` 时，`.h` 里每个成员的声明都不能漏——这是最容易踩的一条。
 * 一个单元有 `.cpp` 时，**两个部件都要交**；少交一个是 `E4002`，多交计划外的路径是 `E2001`（`xl-cli.md` §3.4）。
 * 改完先 `xl_verify` 再 `xl_emit`：前者不写盘，成本低。
+* **多部件迭代时用 `files[].from` 而不是 `content`**：把 `.h` 与 `.cpp` 直接写进各自的计划路径，然后让 `xl_emit` 从磁盘读回这两份（`{"path": "dist/cpp/point.h", "from": "dist/cpp/point.h"}`）。一个 C++ 单元是两个文件，内联提交意味着每轮迭代都要把两份完整文件重述一遍；`from` 读到的旧头会被剥掉并按本次提交重写，所以就地改产物是安全的（[`xl-cli.md`](./xl-cli.md) §3.4）。
 * **`CMakeLists.txt` 不在这张表的任何一项里**：它不在计划的产物清单里，`xl_verify` / `xl_emit` 都不看它一眼。它的位置、内容与构建树隔离由 §11 的约定负责，不由 xl 校验。
 
 ---
@@ -990,7 +991,7 @@ $ cmake -B build && cmake --build build
 | 目标代码里出现裸 `new` / 裸指针所有权 | 泄漏、评审不过 | `std::unique_ptr` / `std::shared_ptr` / 值语义 |
 | `# statement` 依赖其它 TU 的全局对象初始化顺序 | 静态初始化顺序问题 | 改成函数内 `static` 或显式初始化入口（§5.6） |
 | 伪造宿主语言才有的能力（`fetch`…） | 运行时静默错误 | 明确失败或向调用方说明（§5.5） |
-| 在产物里写 `@generated` 头 / 时间戳 | 与 `xl_emit` 追加的头冲突、破坏可复现性 | 只交纯代码，头交给 `xl_emit`（§1） |
+| 在产物里写 `@generated` 头 / 时间戳 | 与 `xl_emit` 追加的头冲突、破坏可复现性 | 只交纯代码，头交给 `xl_emit`（§1）；`files[].from` 读到的头会被剥掉，因此就地改产物不会留下两个头 |
 | 把 `CMakeLists.txt` 放在仓库根 | 仓库根被污染；xl 的布局约定（`<out>/<lang>/`）只覆盖生成树 | 放 `<out>/cpp/CMakeLists.txt`（§11.1） |
 | 从仓库根跑 `cmake .` / `cmake -S . -B <repo>` | 仓库根长出 `CMakeCache.txt`、`CMakeFiles/`、`Makefile`/`build.ninja`；`CMakeCache.txt` 里写满本机绝对路径，还会让后续 cmake 复用错误配置 | `cd dist/cpp && cmake -B build`（§11.2） |
 | 构建树没 gitignore，或 gitignore 了却没真隔离 | 生成树 / 构建树被提交，`git status` 一片红 | `.gitignore` 忽略 `/dist/` + 用 `git status --porcelain` 当判据（§11.2、§11.3） |

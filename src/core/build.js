@@ -22,6 +22,7 @@ import { countBySeverity, dedupeDiagnostics, diag, sortDiagnostics } from './dia
 import { XL_VERSION, printTypeScriptFile } from './emit-ts.js'
 import { fingerprintSource, isArtifact, parseArtifactHeader, renderHeader } from './header.js'
 import { parseXlMd } from './parse.js'
+import { findOrphans, orphanDiagnostics, removeOrphans } from './orphans.js'
 import { detectConflicts, planSource, resolveOutput } from './plan.js'
 import { collectSources, readIgnorePatterns } from './scan.js'
 import { loadSource } from './source.js'
@@ -35,12 +36,13 @@ import { structureSummary } from './verify.js'
  * @param {string} input.cwd - working directory.
  * @param {readonly string[]} input.paths - raw path arguments.
  * @param {readonly string[]} [input.ignore] - `.xlignore` patterns.
+ * @param {boolean} [input.allowEmpty] - allow a workspace with no source at all.
  * @returns {object} the prepared workspace.
- * @throws {UsageError} when no input matches.
+ * @throws {UsageError} when no input matches and an empty workspace was not allowed.
  */
-export function prepareWorkspace({ cwd, paths, ignore }) {
+export function prepareWorkspace({ cwd, paths, ignore, allowEmpty = false }) {
   const patterns = ignore ?? readIgnorePatterns(cwd)
-  const sources = collectSources(paths, cwd, { ignore: patterns })
+  const sources = collectSources(paths, cwd, { ignore: patterns, allowEmpty })
   /** @type {Map<string, object>} */
   const documentCache = new Map()
   /** @type {object[]} */
@@ -356,7 +358,9 @@ export function runBuild(input) {
   const merged = mergeEnv(loaded.config, env)
   const options = resolveBuildOptions({ config: merged, cli: input.cli ?? {} })
   const targets = resolveTargets(options.targets, merged)
-  const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [] })
+  // Residue detection is the one mode in which a workspace with no source at all
+  // is a meaningful thing to build: every product in it is residue by definition.
+  const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [], allowEmpty: options.orphans === true })
   return buildPrepared({ cwd, prepared, targets, options, config: merged, env, loaded })
 }
 
@@ -381,6 +385,13 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
   // so those codes stay out of the ignore set: the run must still fail.
   const ignore = new Set([...(options.checkIgnore ?? [])].filter(code => !UNIGNORABLE_CODES.has(code)))
   const diagnostics = checkWorkspace(prepared, { targets, ignore })
+  // Residue is a fact about the output tree rather than about any input, so it
+  // is detected here rather than in `checkWorkspace`: the whole point of
+  // `E2004` is that no input names the source that produced the product.
+  const orphans = options.orphans === false
+    ? []
+    : findOrphans({ cwd, out: options.out })
+  diagnostics.push(...orphanDiagnostics(orphans))
   const counts = countBySeverity(diagnostics, ignore)
   const result = {
     ok: false,
@@ -390,6 +401,7 @@ export function buildPrepared({ cwd, prepared, targets, options, config, env, lo
     files: [],
     plans: [],
     diagnostics,
+    orphans,
     written: 0,
     skipped: 0,
     planned: 0,
@@ -674,10 +686,17 @@ export function runCheck(input) {
   const config = mergeEnv(loaded.config, env)
   const options = resolveBuildOptions({ config, cli: input.cli ?? {} })
   const targets = resolveTargets(options.targets, config)
-  const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [] })
+  const prepared = prepareWorkspace({ cwd, paths: input.paths ?? [], allowEmpty: options.orphans === true })
   const ignore = options.checkIgnore ?? new Set()
   const diagnostics = checkWorkspace(prepared, { targets, ignore })
-  const counts = countBySeverity(diagnostics, ignore)
+  // A check is also where residue is cheapest to notice: the sources in front of
+  // the author are exactly the ones that still exist.
+  const orphans = options.orphans === false
+    ? []
+    : findOrphans({ cwd, out: options.out })
+  diagnostics.push(...orphanDiagnostics(orphans))
+  const ordered = sortDiagnostics(dedupeDiagnostics(diagnostics)).filter(item => !ignore.has(item.code))
+  const counts = countBySeverity(ordered, ignore)
   const strict = input.cli?.strict === true || options.checkStrict === true
   const maxWarnings = input.cli?.maxWarnings ?? options.checkMaxWarnings
   const overBudget = typeof maxWarnings === 'number' && counts.warnings > maxWarnings
@@ -686,10 +705,51 @@ export function runCheck(input) {
     ok,
     cwd,
     files: prepared.sources.length,
-    diagnostics,
+    diagnostics: ordered,
+    orphans,
     errors: counts.errors,
     warnings: counts.warnings,
     exitCode: ok ? 0 : 1,
+  }
+}
+
+/**
+ * Report the residue of a workspace: every product whose `*.xl.md` source is
+ * gone, and optionally remove exactly those products.
+ *
+ * This is the dedicated entry point behind `xl orphans` and `xl_orphans`; the
+ * same detection also runs inside `xl check` and `xl build` as `E2004`. It is
+ * deliberately its own operation rather than a build option, because deleting
+ * residue is a judgement about the author's intent — xl only proves that the
+ * source is gone, never that the deletion was meant.
+ * @param {object} input - the request.
+ * @param {string} input.cwd - working directory.
+ * @param {object} [input.cli] - parsed command-line options (`out`, `prune`, `orphans`).
+ * @param {object} [input.env] - environment snapshot.
+ * @returns {object} the report, with `removed` filled in when `--prune` was given.
+ */
+export function runOrphans(input) {
+  const cwd = input.cwd
+  const env = input.env ?? process.env
+  const loaded = loadConfig(cwd, env)
+  const config = mergeEnv(loaded.config, env)
+  const options = resolveBuildOptions({ config, cli: input.cli ?? {} })
+  const orphans = findOrphans({ cwd, out: options.out })
+  const prune = input.cli?.prune === true && options.dryRun !== true
+  const outcome = prune
+    ? removeOrphans({ cwd, out: options.out, orphans })
+    : { removed: [], refused: [], skipped: [], dropped: [] }
+  return {
+    ok: prune ? outcome.refused.length === 0 : orphans.length === 0,
+    cwd,
+    out: options.out,
+    pruned: prune,
+    orphans,
+    removed: outcome.removed,
+    refused: outcome.refused,
+    skipped: outcome.skipped,
+    dropped: outcome.dropped,
+    exitCode: orphans.length === 0 || prune ? 0 : 1,
   }
 }
 

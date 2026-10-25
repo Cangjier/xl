@@ -21,7 +21,19 @@ const FIRST_LINE = new RegExp(`^\\s*${MARKER_PATTERN}\\s*${HEADER_MARK} from (.+
 const FIELDS_LINE = new RegExp(`^\\s*${MARKER_PATTERN}\\s*(xl:.*?)\\s*$`)
 
 /**
+ * Whether a header continuation line belongs to the header block rather than
+ * to the product's body: a field line (`xl:sha256:…`, `xl:model:…`), the fixed
+ * `DO NOT EDIT` line, or a blank line.
+ */
+const CONTINUATION_LINE = new RegExp(`^\\s*(?:${MARKER_PATTERN}\\s*(?:xl:.*|DO NOT EDIT.*))?\\s*$`)
+
+/**
  * Render the artifact header (xl-cli §3.6, xl-emit-ts §2).
+ *
+ * The header is ASCII only, and so is everything else xl itself writes into a
+ * product: an artifact is consumed by other toolchains, editors and locales,
+ * so no localized text goes into it. Prose copied out of the source file is the
+ * caller's content, not xl's.
  * @param {object} fields - header facts.
  * @param {string} fields.sourcePath - source path relative to the invocation cwd.
  * @param {string} fields.fingerprint - `sha256` of the normalized source bytes.
@@ -43,7 +55,7 @@ export function renderHeader(fields) {
   return [
     `${fields.comment} ${HEADER_MARK} from ${fields.sourcePath}`,
     `${fields.comment} ${tokens.join('  ')}`,
-    `${fields.comment} DO NOT EDIT — 修改请改 xl.md 并重新生成`,
+    `${fields.comment} DO NOT EDIT - edit the .xl.md source and regenerate`,
   ].join('\n')
 }
 
@@ -92,6 +104,32 @@ export function parseArtifactHeader(text) {
 export function isArtifact(text) {
   const firstLine = normalizeNewlines(text).split('\n', 1)[0] ?? ''
   return firstLine.includes(HEADER_MARK)
+}
+
+/**
+ * Remove the `@generated` header block from a product's text, so its body can be
+ * submitted as the content of the same planned output (xl-cli §3.4).
+ *
+ * A submission is the body only: `xl` always renders a fresh header with the
+ * current source fingerprint, target, model and prompt hash, because the header
+ * is what the incremental rule and the residue scan read. Text that does not
+ * start with a header is returned unchanged.
+ *
+ * The block is taken apart line by line rather than matched as one pattern:
+ * a header is three lines followed by a blank line, and a pattern that allows
+ * its own trailing newline to be optional cannot tell that blank line from a
+ * blank line in the middle of the block, which leaves `DO NOT EDIT` behind.
+ * @param {string} text - the decoded text, typically read from a planned path.
+ * @returns {string} the body without the header block.
+ */
+export function stripArtifactHeader(text) {
+  const normalized = normalizeNewlines(text)
+  if (!isArtifact(normalized)) return normalized
+  const lines = normalized.split('\n')
+  let index = 1
+  while (index < lines.length && index <= 3 && CONTINUATION_LINE.test(lines[index])) index += 1
+  while (index < lines.length && lines[index].trim() === '') index += 1
+  return lines.slice(index).join('\n')
 }
 
 /**

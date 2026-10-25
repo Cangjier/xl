@@ -60,7 +60,6 @@ export function checkDocument(input) {
   }
 
   checkTargetHints(doc, targets, emit)
-  checkMemberProse(doc, emit)
   checkLanguageSections(doc, emit)
 
   return diagnostics
@@ -243,22 +242,6 @@ function checkStatementHints(doc, targets, emit) {
       }
       if (decl.sections.some(section => section.lang === target.name)) continue
       emit('W3010', decl.line, `statement has no ts body and no '## ${target.name}' hint`)
-    }
-  }
-}
-
-/**
- * Warn when a class member carries no prose (`W3102`).
- * @param {object} doc - parsed document.
- * @param {Function} emit - diagnostic sink.
- */
-function checkMemberProse(doc, emit) {
-  for (const decl of doc.decls) {
-    if (decl.kind !== 'class' && decl.kind !== 'interface') continue
-    for (const member of decl.members) {
-      if (member.prose === '') {
-        emit('W3102', member.line, `member "${member.name === '' ? 'constructor' : member.name}" has no description`)
-      }
     }
   }
 }

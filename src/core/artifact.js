@@ -18,7 +18,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { BuildCacheSet } from './cache.js'
 import { checkWorkspace, languageContext, planWorkspace, prepareWorkspace } from './build.js'
 import { cacheRoot, DEFAULTS, mergeEnv } from './config.js'
@@ -29,7 +29,9 @@ import {
   fingerprintPrompt,
   fingerprintSource,
   isArtifact,
+  parseArtifactHeader,
   renderHeader,
+  stripArtifactHeader,
 } from './header.js'
 import { commentMarkerFor } from './parse.js'
 import { resolveOutput } from './plan.js'
@@ -173,41 +175,164 @@ function openCache({ cwd, config, env, options }) {
 }
 
 /**
+ * One submitted product, either supplied inline or adopted off the disk.
+ *
+ * `files[].content` is the inline form: the caller already holds the text and
+ * pays for it in the tool call. `files[].from` is the disk form: the generator
+ * wrote the product straight to a file, and `xl` reads it back, drops any
+ * `@generated` header it carries, and submits the body. Exactly one of the two
+ * is accepted, so a submission can never be ambiguous about its content.
+ * @typedef {object} Submission
+ * @property {string} path - planned output path, POSIX.
+ * @property {string} content - the body to verify and write.
+ * @property {string} [from] - the file it was read from, `cwd`-relative POSIX.
+ */
+
+/**
+ * Turn a `files[]` list into submissions, reading the disk form.
+ * @param {object} input - the request.
+ * @param {string} input.cwd - working directory.
+ * @param {string} input.source - POSIX source path.
+ * @param {string} input.target - resolved target name.
+ * @param {readonly object[]} input.files - entries with `path` and `content` or `from`.
+ * @returns {{submissions: Submission[], diagnostics: object[]}} the submissions
+ *   and the resolution diagnostics (a missing or unreadable `from`, an entry
+ *   with both forms or neither, a header that names another product).
+ */
+function resolveSubmission({ cwd, source, target, files }) {
+  const submissions = []
+  const diagnostics = []
+  for (const file of files) {
+    const path = normalizePath(file?.path)
+    const hasContent = typeof file?.content === 'string'
+    const from = typeof file?.from === 'string' && file.from.trim() !== '' ? file.from : null
+    if (hasContent && from !== null) {
+      diagnostics.push(diag({
+        code: 'E4004',
+        file: source,
+        line: 1,
+        msg: `${path}: supply either content or from, not both`,
+      }))
+      continue
+    }
+    if (!hasContent && from === null) {
+      diagnostics.push(diag({
+        code: 'E4005',
+        file: source,
+        line: 1,
+        msg: `${path}: no content was supplied for this planned output; give content or from`,
+      }))
+      continue
+    }
+    if (hasContent) {
+      submissions.push({ path, content: file.content })
+      continue
+    }
+    const absolute = isAbsolute(from) ? from : resolve(cwd, from)
+    let text
+    try {
+      text = readFileSync(absolute, 'utf8')
+    } catch (error) {
+      diagnostics.push(diag({
+        code: 'E4003',
+        file: source,
+        line: 1,
+        msg: `cannot read files[].from "${normalizePath(from)}": ${error instanceof Error ? error.message : String(error)}`,
+      }))
+      continue
+    }
+    const reported = reportPath(cwd, from)
+    const header = parseArtifactHeader(text)
+    if (header !== null) {
+      const namesAnother = !sameSource(cwd, header.sourcePath, source)
+      const otherTarget = header.target !== '' && header.target !== target
+      if (namesAnother || otherTarget) {
+        diagnostics.push(diag({
+          code: 'W4001',
+          file: source,
+          line: 1,
+          msg: `${path}: the @generated header in "${reported}" names ${header.sourcePath} → ${header.target || '(no target)'}; the header is rewritten for ${source} → ${target}`,
+        }))
+      }
+    }
+    submissions.push({ path, content: stripArtifactHeader(text), from: reported })
+  }
+  return { submissions, diagnostics }
+}
+
+/**
+ * Whether an artifact header's recorded source path names the source being
+ * submitted. Header paths are relative to the working directory of the run that
+ * wrote them, so both sides are resolved before they are compared.
+ * @param {string} cwd - working directory of this request.
+ * @param {string} headerPath - the path recorded in the header.
+ * @param {string} source - the POSIX source path of this request.
+ * @returns {boolean} whether they name the same file.
+ */
+function sameSource(cwd, headerPath, source) {
+  const left = resolve(cwd, String(headerPath).trim())
+  const right = resolve(cwd, source)
+  return normalizePath(left) === normalizePath(right)
+}
+
+/**
+ * A path as it should be reported: `cwd`-relative when it sits below the
+ * working directory, POSIX elsewhere.
+ * @param {string} cwd - working directory.
+ * @param {string} path - the path to report.
+ * @returns {string} the reported path.
+ */
+function reportPath(cwd, path) {
+  const absolute = isAbsolute(path) ? path : resolve(cwd, path)
+  const relativePath = relative(cwd, absolute)
+  if (relativePath !== '' && !relativePath.startsWith('..') && !isAbsolute(relativePath)) {
+    return normalizePath(relativePath)
+  }
+  return normalizePath(absolute)
+}
+
+/**
  * Verify proposed products against the source's structural contract without
  * writing anything.
  * @param {object} input - the request.
  * @param {string} input.cwd - working directory.
  * @param {string} input.source - POSIX source path.
  * @param {string} input.target - target language.
- * @param {readonly object[]} input.files - proposed products with `path` and `content`.
+ * @param {readonly object[]} input.files - proposed products with `path` and `content` or `from`.
  * @param {object} [input.options] - build options.
  * @param {object} [input.config] - merged configuration.
  * @param {object} [input.env] - environment snapshot.
- * @returns {object} the verdict, per-file issues, and the planned paths.
+ * @returns {object} the verdict, per-file issues, the planned paths, and the
+ *   warnings raised while resolving the submissions.
  */
 export function verifyArtifacts({ cwd, source, target, files, options = {}, config = {}, env = process.env }) {
   const opened = contextFor({ cwd, source, target, options, config, env })
   const planned = opened.context.outputs
-  const byPath = new Map(files.map(file => [normalizePath(file.path), file.content]))
+  const resolution = resolveSubmission({ cwd, source, target: opened.resolved.target.name, files })
+  const errors = resolution.diagnostics.filter(item => item.severity === 'error')
+  const byPath = new Map(resolution.submissions.map(submission => [submission.path, submission.content]))
   const unexpected = [...byPath.keys()].filter(path => !planned.some(output => output.path === path))
-  const issues = []
-  for (const output of planned) {
-    const content = byPath.get(output.path)
-    if (content === undefined) {
-      issues.push({ path: output.path, issues: ['no content was supplied for this planned output'] })
-      continue
+  const issues = errors.map(item => ({ path: normalizePath(item.file), issues: [item.msg] }))
+  if (errors.length === 0) {
+    for (const output of planned) {
+      const content = byPath.get(output.path)
+      if (content === undefined) {
+        issues.push({ path: output.path, issues: ['no content was supplied for this planned output'] })
+        continue
+      }
+      const verdict = verifyStructure(opened.entry.doc, content, {
+        only: new Set(output.names),
+        scope: output.scope,
+      })
+      if (!verdict.ok) issues.push({ path: output.path, issues: verdict.issues })
     }
-    const verdict = verifyStructure(opened.entry.doc, content, {
-      only: new Set(output.names),
-      scope: output.scope,
-    })
-    if (!verdict.ok) issues.push({ path: output.path, issues: verdict.issues })
   }
   return {
     ok: issues.length === 0 && unexpected.length === 0,
     issues,
     unexpected,
     planned: planned.map(output => output.path),
+    warnings: resolution.diagnostics.filter(item => item.severity === 'warning'),
   }
 }
 
@@ -233,12 +358,27 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
       ok: false,
       written: [],
       skipped: [],
+      adopted: [],
       diagnostics: errors,
       planned: context.outputs.map(output => output.path),
     }
   }
 
-  const byPath = new Map(files.map(file => [normalizePath(file.path), file.content]))
+  const resolution = resolveSubmission({ cwd, source, target: resolved.target.name, files })
+  const supplyErrors = resolution.diagnostics.filter(item => item.severity === 'error')
+  const adopted = resolution.submissions.filter(submission => submission.from !== undefined).map(submission => submission.path)
+  if (supplyErrors.length > 0) {
+    return {
+      ok: false,
+      written: [],
+      skipped: [],
+      adopted,
+      diagnostics: supplyErrors,
+      planned: context.outputs.map(output => output.path),
+    }
+  }
+
+  const byPath = new Map(resolution.submissions.map(submission => [submission.path, submission.content]))
   const planned = context.outputs
   const unexpected = [...byPath.keys()].filter(path => !planned.some(output => output.path === path))
   if (unexpected.length > 0) {
@@ -246,6 +386,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
       ok: false,
       written: [],
       skipped: [],
+      adopted,
       diagnostics: unexpected.map(path => diag({
         code: 'E2001',
         file: source,
@@ -259,7 +400,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
   const fingerprint = fingerprintSource(entry.text)
   const cache = openCache({ cwd, config, env, options: resolved.options })
   const store = cache.for(resolved.target)
-  const diagnostics = []
+  const diagnostics = [...resolution.diagnostics.filter(item => item.severity === 'warning')]
   const written = []
   const skipped = []
 
@@ -347,6 +488,7 @@ export function emitArtifacts({ cwd, source, target, files, options = {}, config
     ok: written.length === planned.length && counts.errors === 0,
     written,
     skipped,
+    adopted,
     diagnostics,
     planned: planned.map(output => output.path),
     fingerprint,

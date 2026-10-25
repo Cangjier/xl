@@ -1,6 +1,6 @@
 # xl CLI 参考文档
 
-> `xl` 有三个命令：**`xl build`**、**`xl check`**、**`xl targets`**。
+> `xl` 有四个命令：**`xl build`**、**`xl check`**、**`xl orphans`**、**`xl targets`**。
 > 语法以 [`xl-syntax.md`](./xl-syntax.md)（下称「语法」）为唯一事实来源，本文只描述 CLI 的接口与行为，与其冲突时以语法为准。
 
 > 产物映射见 [`xl-emit-ts.md`](./xl-emit-ts.md)；诊断码见 [`xl-check.md`](./xl-check.md)；完整输入与期望产物见 [`xl-base-case.md`](./xl-base-case.md)。
@@ -69,6 +69,8 @@ xl build                              # 编译当前目录下所有 *.xl.md（�
 xl build pkg/demo.xl.md -t csharp     # 单文件、指定目标
 xl build . -t ts -t csharp -t cpp     # 多目标；ts 写盘，其余只给计划
 xl check .                            # 只做静态检查
+xl orphans                            # 报告「源已删、产物还在」的残留
+xl orphans --prune                    # 删掉这些残留产物
 xl targets                            # 列出已知目标
 xl --help                             # 帮助（没有额外的 help 命令）
 xl --version                          # 版本
@@ -97,12 +99,14 @@ xl build [paths...] [options]
 | 生成 | `--no-cache` | 本次不读也不写增量缓存 `cache.json`，**也不再写历史版本归档**，也不报告手改检测（§3.6） |
 | 生成 | `--clean` | 构建前归档并删除本次计划的所有产物，并强制重新生成（`--dry-run` / `--stdout` 下不删除任何东西） |
 | 生成 | `--dry-run` | 只打印「源 → 产物」计划，不写盘（照常报告输出冲突与手改提示） |
+| 生成 | `--no-orphans` | 本次不扫描输出根下的残留产物（不报 `E2004`，§3.9） |
 | 生成 | `--verify` / `--no-verify` | **接受但不生效**：只决定 `xl_emit` 工具的 `verify` 缺省（§3.4） |
 | 校验 | `--ignore <codes>` | 忽略指定诊断码，逗号分隔，如 `--ignore W3011,E1107`；产物层的 `E2001` / `E2002` / `E2003` 不可忽略（§3.8） |
 | 校验 | `--strict` | warning 视为 error（**只对 `xl check` 生效**，§3.8） |
 | 校验 | `--max-warnings <n>` | warning 超过 n 条即失败（**只对 `xl check` 生效**；缺省不限） |
 | 输出 | `--format <fmt>` | `pretty`（缺省）\| `compact` \| `json`（§3.7） |
 | 全局 | `--cwd <dir>` | 以指定目录为基准解析路径与配置（缺省当前目录） |
+| 全局 | `--no-orphans` | 本次不扫描残留产物（`E2004`），`build` / `check` 共用（§3.9） |
 | 全局 | `-q, --quiet` | 只输出 error（等价 `XL_LOG=silent` / `XL_LOG=error`） |
 | 全局 | `--verbose` | 额外把计划与提示写到 stderr（等价 `XL_LOG=debug`） |
 | 全局 | `--json` | NDJSON 事件流（§3.7），不写人类可读输出 |
@@ -124,7 +128,7 @@ xl build [paths...] [options]
 3. 去重并按路径字典序排序，保证产物与事件顺序稳定。
 4. 每个源文件先解析并校验（语法错误见 [`xl-check.md`](./xl-check.md)）：**有 error 就终止**，退出码 1；warning 只提示。
 5. `# dependencies` 里的 ```` ```xl ```` 块解析出跨文件引用，用于校验类型可见性与补齐生成上下文；依赖文件不因为被引用就参与构建，产物仍然只按 `paths` 生成（依赖文件自身的诊断也不出现在输出里）。
-6. 结果为空（路径不存在 `E0001`、或没有匹配到 `*.xl.md` `E0002`）→ 用法错误，退出码 2。
+6. 结果为空（路径不存在 `E0001`、或没有匹配到 `*.xl.md` `E0002`）→ 用法错误，退出码 2。**例外**：残留扫描开着时（缺省），一个 `*.xl.md` 都不剩的工作区正是「源全被删了」，因此 `E0002` 不报，改为报 `E2004` 残留；`--no-orphans` 恢复原样。
 
 ### 3.3 `-t ts`：直出
 
@@ -173,7 +177,7 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 | `xl_context` | 一份「源 × 目标」的完整生成依据：契约（结构摘要 + 输出路径 + 部件 + `layout`）、`promptHash`、该源与依赖的目标语言覆盖段、上一版产物，以及该目标语言的生成指南路径（`docs/xl-emit-<lang>.md`，存在时才给） |
 | `xl_cache` | 该「源 × 目标」的缓存状态：是否 reusable、源指纹、`promptHash`、上一版（按部件扩展名给） |
 | `xl_verify` | 不写盘地校验候选产物（结构回读） |
-| `xl_emit` | 校验并写盘：加产物头与指纹、归档被覆盖的那一版、更新 cache；漏产物 / 多产物 / 结构不符一律拒绝且不写盘 |
+| `xl_emit` | 校验并写盘：加产物头与指纹、归档被覆盖的那一版、更新 cache；每个 `files` 项给 `content`（内联）或 `from`（从磁盘读回）恰一种；漏产物 / 多产物 / 结构不符一律拒绝且不写盘 |
 | `xl_check` | 与 `xl check` 同一个检查器 |
 | `xl_build` | 与 `xl build` 同一个构建器（ts 写盘，其余只给计划） |
 
@@ -182,10 +186,27 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 **输出契约**（写进 `xl_context`，并由 `xl_emit` 的结构回读强制）：
 
 * `xl_emit` 的 `files` 必须**逐一对应**计划报出的路径：给出计划外的路径报 `E2001`；漏掉计划内的路径、或产物结构与 IR 不一致报 `E4002`，且**一个文件都不写**。
+* 每个 `files` 项给出**恰好一种内容来源**，两种形式等价：
+  * `content`：**内联**，代码以字符串直接进工具调用（生成者本来就把代码握在手里时用它）；
+  * `from`：**取磁盘**，给一个本地文件路径（绝对路径，或相对 `cwd`），xl 读它、**剥掉它可能带的 `@generated` 头**、把剩下的正文当成 `content` 提交。生成者用自己的写盘工具把产物写到该路径（可以是计划路径本身，也可以是临时文件），就不必把整份文件再在工具调用里重述一遍——多部件、多轮迭代时代价差别很大。
+  * 两者都给报 `E4004`，都不给报 `E4005`，`from` 读不到报 `E4003`；这三种都是 error，同样**一个文件都不写**。
+* `from` 读到的头**只用于识别与提示，不会被沿用**：产物头（源指纹 / `xl:target` / `xl:ver` / `xl:model` / `xl:prompt`）一律由 xl 按本次提交重写，因为复用判定（§3.6）与残留扫描（§3.9）读的就是它。头里记的源或目标与本次提交不符时另报一条 warning `W4001`，并照常重写头。
 * 产物内容只写目标语言代码：不加 Markdown 围栏，不写对话 / 工具调用标记，不写 `@generated` 头（由 `xl` 统一追加，§3.6）。
 * `layout=file` 的单元只有一份产物；`layout=type` 每个类型一份，模块级 `# type` / `# const` / `# method` / `# statement` 合并进 `<源文件基名>Module.<ext>` 一份。
 * import / using 集中在文件最前面；同一个文件里不重复声明命名空间。
 * 类型名、成员名、参数名、可见性、泛型约束与 `readonly` / `static` / `async` 语义必须与 IR 一致；不得凭空增加公开 API；不得吞掉 `## <lang>` 段里的明确说明。
+
+```jsonc
+// 两种提交形式可以混在同一个 files 数组里
+{
+  "file": "pkg/demo.xl.md",
+  "target": "cpp",
+  "files": [
+    { "path": "dist/cpp/point.h", "from": "dist/cpp/point.h" },   // 就地改完，让 xl 重新登记
+    { "path": "dist/cpp/demo_module.cpp", "content": "..." }      // 内联
+  ]
+}
+```
 
 **结构回读校验**（`xl_verify` / `xl_emit`）是轻量符号扫描，不是解析器，只核对三件事：
 
@@ -199,7 +220,7 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 
 **`promptHash`** 是生成上下文的指纹：`sha256(结构摘要 + 语言覆盖段 + 依赖摘要 + layout + parts + naming)` 的前 16 个十六进制字符，**不含源文件原文**（原文由 `xl:sha256` 表达）。它变了就说明生成依据变了，cache 因此失效。
 
-**工具参数的覆盖范围**：`xl_plan` / `xl_build` / `xl_context` / `xl_verify` / `xl_emit` 都接受 `out` / `naming` / `flat`；`xl_cache` 只接受 `out`。这些值参与**路径计算**，所以 `xl_verify` / `xl_emit` 必须收到与 `xl_plan` / `xl_context` 完全相同的一组值，否则重新算出的路径与计划对不上，提交会被 `E2001` 拒绝。
+**工具参数的覆盖范围**：`xl_plan` / `xl_build` / `xl_context` / `xl_verify` / `xl_emit` 都接受 `out` / `naming` / `flat`；`xl_cache` 只接受 `out`；`xl_emit` 另接受 `model` / `force` / `verify`。这些值参与**路径计算**，所以 `xl_verify` / `xl_emit` 必须收到与 `xl_plan` / `xl_context` 完全相同的一组值，否则重新算出的路径与计划对不上，提交会被 `E2001` 拒绝。
 
 ### 3.5 输出布局
 
@@ -246,10 +267,11 @@ dist/
 ```ts
 // @generated by xl from pkg/demo.xl.md
 // xl:sha256:9f2c…  xl:target:ts  xl:ver:0.1.0
-// DO NOT EDIT — 修改请改 xl.md 并重新生成
+// DO NOT EDIT - edit the .xl.md source and regenerate
 ```
 
 * 字段之间以**两个空格**分隔。直出通道写 `xl:sha256` / `xl:target` / `xl:ver` 三个字段；计划通道的产物由 `xl_emit` 落盘，另加 `xl:model:<id>`（`xl_emit` 的 `model` 参数）与 `xl:prompt:<hash>`（§3.4）。
+* 头三行**只用 ASCII（英文）**：产物会被别人的工具链、编辑器与仓库消费，xl 自己写进去的文字一律不做本地化。源文件里的说明散文由调用方决定是否写进正文，不受此约束。
 * `xl:sha256:<key>` = `sha256(规范化源文件字节)`，规范化只统一换行，因此只改行尾不会让产物失效。
 * `xl.json` 的 `build.header: false` 时不写头三行。
 * **复用判定**：计划中的每个产物都存在、首行是 xl 头、`xl:target` 是本目标、`xl:sha256` 等于当前源指纹 → 直出通道跳过不写、计划通道报 `reusable`。`--force` 忽略该判定。
@@ -258,6 +280,7 @@ dist/
 * `--clean` 先归档再删除本次计划的所有产物，然后按 `reuse=false` 重新生成：产物从源重建，历史仍然保留（`--no-cache` 时归档关闭，只删不存）。
 * 缓存是**尽力而为**：只计划不落盘（`xl_plan`、`xl build -t <其它语言>`）不会建出 cache 目录；cache 写失败不影响已经写好的产物。
 * 产物被手工修改（头在、内容哈希与 cache 记录不符）→ 覆盖前打印警告 `E2003`；`--dry-run` 时同样提示，只是不写盘。`--no-cache` 时无从判断，因此不报告。
+* **残留产物**（`E2004`）：产物头记录的源文件已经不存在时，`xl build` / `xl check` 各报一条 warning（判定见 §3.9）。它不是「产物过期」，而是「没有任何一次运行还会提到这个源」——`--no-orphans` 关掉这次扫描。
 
 ### 3.7 控制台输出与 `--json`
 
@@ -285,8 +308,10 @@ planned outputs belong to a DSH session: call xl_context, then xl_emit.
 | `build` | `file.done` | `src` `target` `channel` `status`（`generated` / `skipped` / `planned` / `failed`）`out` |
 | 两者 | `diag` | `file` `line` `col` `severity` `code` `msg`，可选 `help` `endLine` `endCol` |
 | `build` | `build.warn` / `build.error` | `msg` `src` `target` |
-| `build` | `build.end` | `ok` `written` `skipped` `planned` `warnings` `errors` `ms` |
-| `check` | `check.end` | `ok` `files` `errors` `warnings` |
+| `build` | `build.end` | `ok` `written` `skipped` `planned` `orphans` `warnings` `errors` `ms` |
+| `check` | `check.end` | `ok` `files` `orphans` `errors` `warnings` |
+| `orphans` | `orphan` | `out` `source` `target` `found`（`header` / `cache`）`exists` |
+| `orphans` | `orphans.end` | `out` `orphans` `pruned` `removed` `refused` |
 | `targets` | `target` | `name` `channel`（`direct` / `harness`）`ext`（逗号分隔的扩展名）`layout` `parts` |
 
 > `channel` 字段用的是内部名 `direct` / `harness`；人可读输出把它渲染为 `direct` / `plan`。
@@ -308,12 +333,44 @@ cpp	plan	.h,.cpp	type
 
 | 码 | 含义 |
 | --- | --- |
-| 0 | 成功（允许存在 warning）；`xl build` 下有目标只被计划也算成功 |
-| 1 | 源文件有 error、输出冲突、写盘失败 |
+| 0 | 成功（允许存在 warning）；`xl build` 下有目标只被计划也算成功；`xl orphans` 无残留或 `--prune` 已执行 |
+| 1 | 源文件有 error、输出冲突、写盘失败；`xl orphans` 报告出残留（未 `--prune`） |
 | 2 | 用法错误（未知命令 / 未知选项 / 无输入 / 路径不存在 `E0001` / 没匹配到输入 `E0002` / 非法 `--target` `E0003` / 未声明扩展名或部件表的自定义目标 `E0004`） |
 
 > `xl` 不返回 3 / 4：计划通道的失败由会话里的 `xl_emit` 以 `E4002` 表达（[`xl-check.md`](./xl-check.md) §5）。
-> `--ignore` 只对解析 / 检查层的码生效；产物层的 `E2001` / `E2002` / `E2003` 写进 `--ignore` 也会照常计数，写盘失败或输出冲突一律退出 1。
+> `--ignore` 只对解析 / 检查层的码（以及 `E2004`）生效；产物层的 `E2001` / `E2002` / `E2003` 写进 `--ignore` 也会照常计数，写盘失败或输出冲突一律退出 1。
+
+### 3.9 残留产物：`xl orphans`
+
+`*.xl.md` 被删掉之后，它写出的产物仍留在 `<out>/<lang>/` 里，而**其它任何操作都看不见**：输入列表里没有它，cache 按源索引，计划也不再提到它。发布步骤与语言工具链照旧会带上它。
+
+`xl` 从两条独立通道认出这件事（详见 [`xl-check.md`](./xl-check.md) §5.1）：**产物头**（递归 `<out>`，首行含 `@generated` 的文件按头解析，`from <源>` 指向的文件不存在）与**每份 `cache.json`**（某条「源 × 目标」记录的源已消失）。`xl build` / `xl check` 缺省就报 `E2004`；`--no-orphans` 关掉扫描；`--ignore E2004` 只把它从结果里去掉。
+
+```console
+$ xl orphans
+dist/ts/demo.ts [ts] ← demo.xl.md
+✖ 1 orphaned output(s) found under dist
+run `xl orphans --prune` to remove them
+
+$ xl orphans --prune
+removed dist/ts/demo.ts
+✔ 1 orphaned output(s) removed under dist
+
+$ xl orphans
+✔ no orphaned output under dist
+```
+
+| 选项 | 作用 |
+| --- | --- |
+| `-o, --out <dir>` | 输出根目录，与 `xl build` 同一套取值顺序（§3.5） |
+| `--prune` | 删除报告出来的产物；非 xl 产物一律拒删并列入 `refused` |
+| `--dry-run` | 与 `--prune` 同用时只报告、不删除 |
+| `--no-orphans` | 无意义（该命令本身就是扫描），接受但无效 |
+| `--format <fmt>` / `--json` / `--cwd <dir>` / `-q` / `--verbose` / `--color <when>` | 与其它命令一致（§3.7） |
+
+* 判定只依赖输出根（外加本次的 `--out` / `xl.json` / `XL_OUT`），与 `paths` 参数无关：`xl orphans` 不接受路径。
+* `--prune` **只删当场能解析出 xl 头的文件**，并同时丢掉对应的 cache 记录，因此可以反复跑（幂等）。手写在输出目录里的文件、以及 `.xl/` 下的历史归档都不会被动。
+* 退出码：无残留 0；有残留且未 `--prune` 为 1；`--prune` 执行完为 0（有拒删项时为 1）。
 
 ---
 
@@ -360,7 +417,7 @@ cpp	plan	.h,.cpp	type
 * `targets.<lang>.namespace` 被读入目标描述符，但**本实现没有任何地方消费它**：`# namespace` 到目标语言的映射目前由生成者（agent）自己按提示决定。
 * **不生效的字段**：`build.concurrency`、`build.verify`、`build.specHint`、`build.source`、`targets.<lang>.layout`（解析自定义目标时根本不读它）、`targets.<lang>.model`（模型 id 现在由 agent 在 `xl_emit` 的 `model` 参数里给出）；`harness` 段整体不再被读取。
 * `check` 段影响 `xl check` 与 `xl build` 的隐式校验：规则码、级别与退出码见 [`xl-check.md`](./xl-check.md)。
-* 部署侧的 profile 行配置（`workspaceRoot` / `cacheDir` / `defaultTargets` / `verifyOnEmit`）见 [`../README.md`](../README.md) §5.1；`xl.json` 与 `XL_CACHE_DIR` 的优先级更高。
+* 部署侧的 profile 行配置（`workspaceRoot` / `cacheDir` / `defaultTargets` / `verifyOnEmit`）见 [`../README.md`](../README.md) §6.1；`xl.json` 与 `XL_CACHE_DIR` 的优先级更高。
 
 ---
 

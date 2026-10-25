@@ -26,6 +26,7 @@ export {
   resolveRequestedTargets,
   runBuild,
   runCheck,
+  runOrphans,
   runPlan,
 } from './build.js'
 export { checkDeclaredTargets, checkDocument, languageNamesOf, overrideSections } from './check.js'
@@ -78,6 +79,13 @@ export {
   parseArtifactHeader,
   renderHeader,
 } from './header.js'
+export {
+  DEFAULT_SCAN_DEPTH,
+  findOrphans,
+  forgetStaleCacheEntries,
+  orphanDiagnostics,
+  removeOrphans,
+} from './orphans.js'
 export {
   detectConflicts,
   outputRoot,

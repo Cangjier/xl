@@ -31,6 +31,7 @@ const MODULES = [
   'check.js',
   'build.js',
   'artifact.js',
+  'orphans.js',
 ]
 
 /** @type {Map<string, Set<string>>} */

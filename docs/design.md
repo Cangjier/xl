@@ -54,10 +54,11 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 
 ```text
 ┌─ src/plugin/cli.js ────────── xl profile 的应用行：argv → 请求 → 终端输出
-├─ src/plugin/tools.js ──────── 七个模型工具：请求 → 服务 → 模型可读文本
+├─ src/plugin/tools.js ──────── 八个模型工具：请求 → 服务 → 模型可读文本
 ├─ src/plugin/service.js ────── 能力缝：把请求翻译成 core 调用
 ├─ src/core/artifact.js ─────── 计划通道三操作：context / verify / emit（有 I/O）
 ├─ src/core/build.js ────────── 扫描 → 解析 → 检查 → 计划 → 产出（有 I/O）
+├─ src/core/orphans.js ──────── 残留产物：源已删、产物还在（有 I/O）
 └─ src/core/{parse,check,emit-ts,plan,verify,types,header,text,diagnostics}.js
                                 纯函数：IR、规则、ts 打印、路径、契约、指纹
 ```
@@ -110,10 +111,12 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 覆盖前把旧产物归档，只保留最近 N 版 | `cache.js` | `tests/artifact.test.js` |
 | 产物与它的增量 cache 同处 `<out>/<目标语言>/`，语言之间不共享目录，且只计划不落盘不留缓存 | `plan.js` 的语言目录、`config.js` `cacheRoot`、`cache.js` `BuildCacheSet` | `tests/plan.test.js`、`tests/build.test.js` |
 | 计划外的路径一律拒绝 | `artifact.js` `emitArtifacts` | `tests/artifact.test.js` |
+| 一个 `files` 项恰有一种内容来源（`content` 或 `from`），且 `from` 读回的头一律被剥掉并按本次提交重写，目录里不会出现两个 `@generated` 头 | `artifact.js` `resolveSubmission`、`header.js` `stripArtifactHeader` | `tests/artifact.test.js`、`tests/plugin.test.js` |
 | 一个单元产出哪些文件只由目标的 `parts` 与 IR 决定，且至少产出一个 | `plan.js` `planSource` / `plannedParts` / `unitNeedsBodies` | `tests/plan.test.js` |
 | 定义部件（C++ `.cpp`）只校验它提到的成员，声明部件必须提到全部成员 | `verify.js` `verifyStructure` 的 `scope` | `tests/artifact.test.js` |
 | `# statement` 段逐字节进入 ts 产物，且不参与导出与结构校验 | `emit-ts.js` `renderStatement`、`parse.js` `exportedNamesOf`、`verify.js` `verifyStructure` | `tests/conformance.test.js`、`tests/emit-ts.test.js` |
 | 不挂访问器的 `property` 等价于一对空访问器（读写直通），且不触发 `W3010` | `parse.js` `collectMemberChildren`（合成并打 `synthesized` 标记）、`emit-ts.js` `renderProperty`、`check.js` `checkTargetHints` | `tests/parse.test.js`、`tests/emit-ts.test.js` |
+| 源文件被删后，其产物被认成残留（`E2004`），且 `--prune` 只删当场能解析出 xl 头的文件、同时丢掉对应 cache 记录（幂等） | `orphans.js` `findOrphans` / `removeOrphans` / `forgetStaleCacheEntries` | `tests/orphans.test.js` |
 | `xl_context` 报出的目标语言生成指南存在才给路径，且不进 `promptHash` | `tools.js` `resolveGuide` / `renderContext`（纯渲染，`existsSync` 留在 plugin 层） | `tests/plugin.test.js` |
 | interface 的 `property` 是属性签名：有 `set` 才可变，只有 `get` 时产物是 `readonly` | `emit-ts.js` `renderInterfaceMember` | `tests/emit-ts.test.js` |
 | 声明之间没有顺序要求，只有 `# dependencies` 必须最前、`# namespace` 至多一次 | `parse.js` `parseXlMd` | `tests/parse.test.js` |
@@ -125,7 +128,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 
 ## 5. 诊断码的归属
 
-规范把码分成 `E0`（输入）/ `E1`（语法与结构）/ `E2`（产物）/ `E4`（非 ts 通道）四段，但**级别**由 `xl-check.md` 的表决定，不看前缀（`E1105` `E1107` `E2003` 是 warning）。`src/core/diagnostics.js` 的 `DIAG_CODES` 是唯一事实来源，`severityOf` 只读它，未知码按 error 处理。
+规范把码分成 `E0`（输入）/ `E1`（语法与结构）/ `E2`（产物）/ `E4`（非 ts 通道）四段，但**级别**由 `xl-check.md` 的表决定，不看前缀（`E1105` `E1107` `E2003` `E2004` 是 warning）。`src/core/diagnostics.js` 的 `DIAG_CODES` 是唯一事实来源，`severityOf` 只读它，未知码按 error 处理。
 
 码在哪一层产生，按「需要什么才能判定」划分。`pnpm run codes` 从源码重新导出这张表，任何「定义了但没人产生」或「用了但不在表里」的码都会让它失败：
 
@@ -133,9 +136,10 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | --- | --- | --- |
 | `scan.js` `targets.js` | 路径展开、目标声明 | `E0001` `E0002` `E0003` `E0004` |
 | `source.js` | 文件字节 | `E0005`（另有读源文件失败的 `E2002`） |
-| `parse.js` | 单个文件的 IR | `E1001`–`E1005`（`# dependencies` 必须在最前、`# namespace` 至多一次由 `parseXlMd` 主循环判）、`E1006`（只判 `xl` 块的行形态）、`E1101`–`E1103` `E1106` `E1108`–`E1110`、`E1201`–`E1212`、`E1301`–`E1305`、`W3011` `W3012` `W3013` `W3103` |
-| `check.js` | 整个文档 + 依赖索引 + 目标列表 | `E1104` `E1105`（目标解析与接口成员）、`W3010` `W3101` `W3102` `W3104` |
+| `parse.js` | 单个文件的 IR | `E1001`–`E1005`（`# dependencies` 必须在最前、`# namespace` 至多一次由 `parseXlMd` 主循环判）、`E1006`（只判 `xl` 块的行形态）、`E1101`–`E1103` `E1106` `E1108`–`E1110`、`E1201`–`E1212`、`E1301`–`E1305`、`W3011` `W3012` `W3013` |
+| `check.js` | 整个文档 + 依赖索引 + 目标列表 | `E1104` `E1105`（目标解析与接口成员）、`W3010` `W3101` `W3104` |
 | `build.js` | 文件系统 | `E1006`（依赖目标读不到或没有该导出）、`E1107`、`E2001` `E2002` `E2003` |
+| `orphans.js` | 输出树（产物头与各语言 cache） | `E2004` |
 | `artifact.js` | 生成者提交的内容 | `E2001` `E2002` `E4002` |
 
 `E1104` 与 `E1105` 在两层各有一部分：parser 管「关键字写了但目标为空」的形状（`# class box extends`），checker 管「目标解析不到 / 不是 interface / 成员没实现」。
@@ -175,6 +179,7 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 让生成者拿到更多上下文 | `src/core/build.js` 的 `languageContext` 与 `src/core/artifact.js` 的 `contextFor`（注意 `promptHash` 的输入要同步，否则 cache 失效判定会失真） |
 | 换掉写盘实现（例如走 `ctx.fs` 沙箱） | `src/core/build.js` 的 `processPlan` 与 `src/core/artifact.js` 的 `emitArtifacts` |
 | 让 `xl build` 自己起 agent | `src/plugin/cli.js` 的 `runBuildCommand`：在 `planned` 分支里改用 `ctx.agents` / `ctx.subagents` 驱动 |
+| 加一种「输出树里的异常」（残留之外的，例如产物头与源指纹不符） | `src/core/orphans.js`：`findOrphans` 的两条通道各是一个遍历，加一条判定就是加一个 `records.push`；再给 `DIAG_CODES` 一个新码，并把它挂进 `runCheck` / `buildPrepared` 的 `diagnostics` |
 | 改规范 / 文档 | 直接改 `docs/xl-*.md`（`xl-base-case.md` 除外，它连带验收 fixture）；改完跑 `pnpm test`、`pnpm codes`，动了基准样例再跑 `pnpm fixtures` |
 
 最后一条代码扩展点是刻意留出的：当前选择是「计划通道」，如果将来要回到「xl 自动起 agent」，改动点只在应用行的 `planned` 分支——core、服务、工具都不用动。
@@ -199,3 +204,6 @@ xl 保留的职责恰好是「每个 agent 都会写错、或必须与上一次�
 | 10 | 被读入但无人消费的配置字段 | `src/core/targets.js`、`src/core/config.js` | `targets.<lang>.namespace` / `.model` 存进描述符后没人读；`targets.<lang>.layout` 根本不读；`build.verify` / `build.specHint` / `build.source` / `harness` 段不生效。`build.specHint` **不会**接上生成指南（指南路径见第 11 条）：它早就是文档化的「不生效」字段，复活它要连带改两份规范 |
 | 11 | `xl_context` 里的生成指南是**文件存在性探测**的结果 | `src/plugin/tools.js` `resolveGuide` | 探测顺序是插件自带 `docs/` → 请求 `cwd` 的 `docs/`，都命中不到就回一句「没有指南」；因此**cwd 的目录内容会改变工具输出**，但指南不进 `promptHash`（`fingerprintPrompt` 的入参只有 summary / language / dependencies / layout / parts / naming），所以不影响复用判定。目前只有 cpp 带指南 |
 | 11 | 归档家族是 源 × 扩展名，不是 源 × 产物路径 | `src/core/cache.js` `latestArchives` | `layout=type` 下一个源有多个同扩展名产物时只保留其中一个的历史；这是既有粒度，见 `../README.md` §9 |
+| 12 | 残留扫描开着时，一个 `*.xl.md` 都不剩的工作区**不再报** `E0002` | `src/core/build.js` `runBuild` / `runCheck`（`allowEmpty: options.orphans === true`）→ `src/core/scan.js` `collectSources` | 「源全被删了」正是残留检测要处理的样子，报用法错误会让 `xl check` 在那种工作区里无法使用；`--no-orphans` 恢复 `E0002`（退出码 2）。判定只按开关，不按那一轮是否真的找到残留 |
+| 13 | 残留判定按**产物路径**去重，两条通道相同时以产物头为准 | `src/core/orphans.js` `finalize` | 产物头能给出目标语言，cache 记录只能给出「源 × 目标」与产物路径；同一路径两条通道都命中时取信息更多的那条 |
+| 14 | `cache.json` 只按**文档形状**识别（`entries` 里每条都要有 `out` 数组），不按目标列表或 cache 目录名 | `src/core/orphans.js` `cacheFiles` / `cacheOrphans` | 这样配置里删掉的语言、`XL_CACHE_DIR` 指向别处的存储、以及不叫 `.xl` 的 cache 目录都能被找到；代价是一个恰好同形的无关 `cache.json` 会被读一次（它没有指向不存在源文件的记录，因此不产生残留） |

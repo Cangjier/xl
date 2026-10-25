@@ -211,14 +211,9 @@ test('W3101 is suppressed by a matching dependency note', () => {
   assert.equal(codes({ 'a.xl.md': source }, ['csharp']).includes('W3101'), false)
 })
 
-test('W3102 fires for a member without prose', () => {
-  const source = ['# class point', '', '## field x:int = 0', ''].join('\n')
-  assert.deepEqual(codes({ 'a.xl.md': source }), ['W3102'])
-})
-
-test('W3103 fires for a namespace without a description', () => {
-  const source = ['# namespace demo', ''].join('\n')
-  assert.deepEqual(codes({ 'a.xl.md': source }), ['W3103'])
+test('a member without prose and a namespace without a description are not warned about', () => {
+  const source = ['# namespace demo', '', '# class point', '', '## field x:int = 0', ''].join('\n')
+  assert.deepEqual(codes({ 'a.xl.md': source }), [])
 })
 
 test('W3104 fires for a requested target with no override section', () => {
@@ -264,12 +259,21 @@ test('W3011 and W3012 report empty language sections and empty blocks', () => {
 })
 
 test('an ignored code is removed from the result', () => {
-  const cwd = makeWorkspace({ 'a.xl.md': ['# class point', '', '## field x:int = 0', ''].join('\n') })
+  const cwd = makeWorkspace({
+    'a.xl.md': [
+      '# statement',
+      '```ts',
+      'import fs from "node:fs";',
+      'fs.readFileSync("x");',
+      '```',
+      '',
+    ].join('\n'),
+  })
   try {
     const prepared = prepareWorkspace({ cwd, paths: ['.'] })
     const diagnostics = checkWorkspace(prepared, {
       targets: [resolveTarget('ts', {})],
-      ignore: new Set(['W3102']),
+      ignore: new Set(['W3013']),
     })
     assert.deepEqual(diagnostics, [])
   } finally {

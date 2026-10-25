@@ -43,6 +43,14 @@ const BUILD_OPTIONS = [
   { names: ['--format'], key: 'format', kind: 'string' },
 ]
 
+/** Options accepted by `xl orphans`. */
+const ORPHANS_OPTIONS = [
+  { names: ['-o', '--out'], key: 'out', kind: 'string' },
+  { names: ['--prune'], key: 'prune', kind: 'true' },
+  { names: ['--dry-run'], key: 'dryRun', kind: 'true' },
+  { names: ['--format'], key: 'format', kind: 'string' },
+]
+
 /** Options accepted by `xl check`. */
 const CHECK_OPTIONS = [
   { names: ['-t', '--target'], key: 'targets', kind: 'repeat' },
@@ -59,6 +67,7 @@ const TARGETS_OPTIONS = []
 /** Options every command accepts. */
 const GLOBAL_OPTIONS = [
   { names: ['--cwd'], key: 'cwd', kind: 'string' },
+  { names: ['--no-orphans'], key: 'orphans', kind: 'false' },
   { names: ['-q', '--quiet'], key: 'quiet', kind: 'true' },
   { names: ['--verbose'], key: 'verbose', kind: 'true' },
   { names: ['--json'], key: 'json', kind: 'true' },
@@ -68,7 +77,7 @@ const GLOBAL_OPTIONS = [
 ]
 
 /** Commands the `xl` profile accepts. */
-export const COMMANDS = new Set(['build', 'check', 'targets'])
+export const COMMANDS = new Set(['build', 'check', 'orphans', 'targets'])
 
 /**
  * The option table of one command.
@@ -76,7 +85,13 @@ export const COMMANDS = new Set(['build', 'check', 'targets'])
  * @returns {OptionSpec[]} the accepted options.
  */
 export function optionTable(command) {
-  const specific = command === 'check' ? CHECK_OPTIONS : command === 'targets' ? TARGETS_OPTIONS : BUILD_OPTIONS
+  const specific = command === 'check'
+    ? CHECK_OPTIONS
+    : command === 'orphans'
+      ? ORPHANS_OPTIONS
+      : command === 'targets'
+        ? TARGETS_OPTIONS
+        : BUILD_OPTIONS
   return [...GLOBAL_OPTIONS, ...specific]
 }
 
@@ -207,6 +222,7 @@ export const HELP_TEXT = `xl ${XL_CLI_VERSION} — xl-md (*.xl.md) compiler
 用法:
   xl build [paths...] [options]    把 *.xl.md 编译成目标语言产物
   xl check [paths...] [options]    只做语法 / 结构 / 引用检查，不写盘
+  xl orphans [options]             报告（可选删除）源文件已被删掉的残留产物
   xl targets [options]             列出已知目标
   xl --help | -h                   帮助
   xl --version | -v                版本
@@ -215,6 +231,12 @@ export const HELP_TEXT = `xl ${XL_CLI_VERSION} — xl-md (*.xl.md) compiler
   ts              直出。xl 内置打印器离线生成，字节稳定。
   其它语言        计划通道。xl 只给出产物路径、结构契约、语言上下文与 cache；
                   生成由 DSH 会话里的 agent 调用 xl_* 工具完成，xl 不调用模型。
+
+残留产物:
+  *.xl.md 被删掉后，它写出的产物仍然留在 <out>/<lang>/ 里，语言工具链与发布步骤照旧会带上它。
+  xl 从产物头与 <out>/<lang>/.xl/cache.json 两处认出这种残留，报 warning E2004（E2004 可被 --ignore 关闭）：
+  xl check / xl build 缺省就报；--no-orphans 关掉这次扫描。
+  xl orphans 只报告（有残留时退出码 1）；xl orphans --prune 删掉这些产物（只删带 xl 头的文件）。
 
 build 选项:
   -t, --target <lang>       目标语言，可重复（-t ts -t csharp）；缺省取 xl.json 的 build.target，再取行配置的 defaultTargets，再缺省 ts
@@ -228,6 +250,7 @@ build 选项:
   --concurrency <n>         并发任务数（缺省 min(4, CPU)）
   --keep-going              单个文件失败后继续构建其余文件
   --dry-run                 只打印计划，不写盘
+  --no-orphans              本次不扫描残留产物（不报 E2004）
   --ignore <codes>          忽略指定诊断码，逗号分隔（写盘失败与输出冲突不受影响）
   --strict                  warning 视为 error
   --max-warnings <n>        warning 数量上限
@@ -241,16 +264,23 @@ build 选项:
 check 选项:
   -t, --target <lang>       决定生成质量提示针对的目标语言
   --strict / --max-warnings <n> / --ignore <codes> / --format <fmt> / --json   同上
-  --cwd <dir> / -q / --verbose / --color <when>                               同上
+  --cwd <dir> / --no-orphans / -q / --verbose / --color <when>                 同上
+
+orphans 选项:
+  -o, --out <dir>           输出根目录（缺省：xl.json 的 build.out，再缺省 dist）
+  --prune                   删除报告出来的残留产物；非 xl 产物一律拒绝删除，并在报告里列出
+  --dry-run                 与 --prune 同用时只报告、不删除
+  --format <fmt> / --json / --cwd <dir> / -q / --verbose / --color <when>      同上
 
 环境变量:
   XL_TARGET XL_OUT XL_CONFIG XL_CACHE_DIR XL_LOG NO_COLOR FORCE_COLOR
   优先级：CLI 参数 > 环境变量 > xl.json > 内置缺省
 
 退出码:
-  0 成功（允许 warning）    1 源文件有 error / 输出冲突 / 写盘失败
+  0 成功（允许 warning）；xl orphans 无残留、或 --prune 已执行完
+  1 源文件有 error / 输出冲突 / 写盘失败；xl orphans 报告出残留
   2 用法错误                3 计划通道失败（本插件不返回）
 `
 
 /** Help text shown when the invocation names no command. */
-export const USAGE_TEXT = 'usage: xl <build|check|targets> [paths...] [options]\nrun "xl --help" for details'
+export const USAGE_TEXT = 'usage: xl <build|check|orphans|targets> [paths...] [options]\nrun "xl --help" for details'

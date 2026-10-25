@@ -189,6 +189,7 @@ function walk(root, cwd, into, ignore) {
  * @param {string} cwd - working directory the invocation resolves against.
  * @param {object} [options] - discovery options.
  * @param {readonly string[]} [options.ignore] - `.xlignore` patterns; read from `cwd` when omitted.
+ * @param {boolean} [options.allowEmpty] - return an empty list instead of raising `E0002`.
  * @returns {string[]} the input list.
  * @throws {UsageError} `E0001` for a missing path, `E0002` when nothing matched.
  */
@@ -223,7 +224,7 @@ export function collectSources(paths, cwd, options = {}) {
     .filter(relPath => !isArtifact(safeRead(join(cwd, relPath))))
     .sort()
 
-  if (unique.length === 0) {
+  if (unique.length === 0 && options.allowEmpty !== true) {
     throw new UsageError('no *.xl.md input matched the given paths', 'E0002')
   }
   return unique
